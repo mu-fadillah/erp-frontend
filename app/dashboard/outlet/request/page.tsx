@@ -5,7 +5,7 @@ import { useState, useEffect } from 'react';
 
 export default function AdminOutletRequestPage() {
   const [products, setProducts] = useState([]);
-  const [categories, setCategories] = useState([]); // State baru untuk kategori
+  const [categories, setCategories] = useState([]);
   const [searchTerm, setSearchTerm] = useState('');
   const [cart, setCart] = useState<any[]>([]);
   const [loading, setLoading] = useState(false);
@@ -13,13 +13,11 @@ export default function AdminOutletRequestPage() {
   const API_URL = 'http://localhost:3000'; 
 
   useEffect(() => {
-    // Load Produk
     fetch(`${API_URL}/product`)
       .then((res) => res.json())
       .then((data) => setProducts(Array.isArray(data) ? data : data.data || []));
 
-    // Load Kategori untuk suggestions [cite: 2026-01-25]
-    fetch(`${API_URL}/category`) // Pastikan Anda punya endpoint GET /category
+    fetch(`${API_URL}/category`)
       .then((res) => res.json())
       .then((data) => setCategories(Array.isArray(data) ? data : data.data || []))
       .catch((err) => console.error("Gagal load kategori:", err));
@@ -29,22 +27,22 @@ export default function AdminOutletRequestPage() {
     p?.name?.toLowerCase().includes(searchTerm.toLowerCase())
   );
 
-  // Fungsi Tambah Item (Lama atau Baru)
   const addToCart = (product?: any) => {
-    // Jika product ada, berarti item lama. Jika tidak, berarti input manual item baru.
     const newItem = product ? {
       productId: product.id,
       name: product.name,
       categoryName: product.category?.name || 'Umum',
       uom: product.uom || 'PCS',
       quantity: 1,
-      currentStock: 0
+      currentStock: 0,
+      notes: '' // Inisialisasi field catatan
     } : {
-      name: searchTerm, // Mengambil teks yang sedang diketik sebagai nama barang baru
+      name: searchTerm,
       categoryName: '',
       uom: 'PCS',
       quantity: 1,
-      currentStock: 0
+      currentStock: 0,
+      notes: '' // Inisialisasi field catatan
     };
 
     setCart([...cart, newItem]);
@@ -54,7 +52,6 @@ export default function AdminOutletRequestPage() {
   const handleSendRequest = async () => {
     if (cart.length === 0) return;
     
-    // Validasi sederhana sebelum kirim
     const isInvalid = cart.some(item => !item.name || !item.categoryName || !item.uom);
     if (isInvalid) {
       alert("Mohon lengkapi Nama, Kategori, dan Satuan untuk semua item.");
@@ -66,7 +63,7 @@ export default function AdminOutletRequestPage() {
       const response = await fetch(`${API_URL}/purchasing/pr/create`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ items: cart }), // Mengirim sesuai CreatePRDto
+        body: JSON.stringify({ items: cart }),
       });
 
       if (response.ok) {
@@ -81,8 +78,7 @@ export default function AdminOutletRequestPage() {
   };
 
   return (
-    <div className="p-6 max-w-5xl mx-auto space-y-6">
-      {/* 1. Datalist untuk Autocomplete Kategori */}
+    <div className="p-6 max-w-6xl mx-auto space-y-6">
       <datalist id="category-list">
         {categories.map((cat: any) => (
           <option key={cat.id} value={cat.name} />
@@ -94,7 +90,6 @@ export default function AdminOutletRequestPage() {
         <p className="text-gray-500 text-sm">Input permintaan barang outlet ke bagian Purchasing.</p>
       </div>
 
-      {/* SEKSI ATAS: Pencarian & Input [cite: 2026-01-25] */}
       <div className="bg-white p-6 rounded-2xl border shadow-sm border-orange-100">
         <label className="block text-sm font-semibold mb-3 text-gray-700">Cari atau Tambah Item Baru:</label>
         <div className="relative">
@@ -108,7 +103,6 @@ export default function AdminOutletRequestPage() {
           
           {searchTerm.length > 0 && (
             <div className="absolute z-50 w-full bg-white border shadow-2xl mt-2 rounded-2xl overflow-hidden border-orange-100">
-              {/* Hasil Pencarian */}
               {filteredProducts.slice(0, 5).map((p: any) => (
                 <div 
                   key={p.id} 
@@ -123,7 +117,6 @@ export default function AdminOutletRequestPage() {
                 </div>
               ))}
               
-              {/* Opsi Barang Baru */}
               <div 
                 onClick={() => addToCart()} 
                 className="p-4 bg-orange-600 text-white cursor-pointer hover:bg-orange-700 flex justify-between items-center"
@@ -142,7 +135,6 @@ export default function AdminOutletRequestPage() {
         </div>
       </div>
 
-      {/* SEKSI BAWAH: Daftar Request (Tabel) [cite: 2026-01-25] */}
       <div className="bg-white rounded-2xl border shadow-sm overflow-hidden">
         <div className="p-5 border-b bg-gray-50 flex justify-between items-center">
           <h2 className="font-bold text-gray-700">Item Terpilih ({cart.length})</h2>
@@ -165,6 +157,7 @@ export default function AdminOutletRequestPage() {
                   <th className="px-6 py-4 text-center">Satuan</th>
                   <th className="px-6 py-4 text-center">Stok Saat Ini</th>
                   <th className="px-6 py-4 text-center">Qty Request</th>
+                  <th className="px-6 py-4">Catatan Khusus (Merk/Kondisi)</th>
                   <th className="px-6 py-4 text-center">Aksi</th>
                 </tr>
               </thead>
@@ -172,7 +165,7 @@ export default function AdminOutletRequestPage() {
                 {cart.map((item, idx) => (
                   <tr key={idx} className="hover:bg-gray-50/30 transition-colors">
                     <td className="px-6 py-4">
-                      <p className="font-bold text-gray-800">{item.name}</p>
+                      <p className="font-bold text-gray-800 leading-tight">{item.name}</p>
                       <input 
                         list="category-list"
                         placeholder="Set Kategori..." 
@@ -203,7 +196,7 @@ export default function AdminOutletRequestPage() {
                     <td className="px-6 py-4 text-center">
                       <input 
                         type="number" 
-                        className="w-20 p-2 border border-gray-200 rounded-xl text-center focus:ring-2 focus:ring-orange-100 outline-none"
+                        className="w-16 p-2 border border-gray-200 rounded-xl text-center focus:ring-2 focus:ring-orange-100 outline-none"
                         value={item.currentStock}
                         onChange={(e) => {
                           const newCart = [...cart];
@@ -215,11 +208,25 @@ export default function AdminOutletRequestPage() {
                     <td className="px-6 py-4 text-center">
                       <input 
                         type="number" 
-                        className="w-20 p-2 border-2 border-orange-100 rounded-xl text-center font-bold text-orange-600 focus:border-orange-500 outline-none"
+                        className="w-16 p-2 border-2 border-orange-100 rounded-xl text-center font-bold text-orange-600 focus:border-orange-500 outline-none"
                         value={item.quantity}
                         onChange={(e) => {
                           const newCart = [...cart];
                           newCart[idx].quantity = Number(e.target.value);
+                          setCart(newCart);
+                        }}
+                      />
+                    </td>
+                    {/* FITUR BARU: Kolom Note */}
+                    <td className="px-6 py-4">
+                      <textarea 
+                        placeholder="Contoh: Merk Bimoli, harus fresh..."
+                        rows={1}
+                        className="w-full p-2 bg-gray-50 border border-gray-100 rounded-xl text-xs focus:bg-white focus:border-orange-300 outline-none transition-all resize-none"
+                        value={item.notes}
+                        onChange={(e) => {
+                          const newCart = [...cart];
+                          newCart[idx].notes = e.target.value;
                           setCart(newCart);
                         }}
                       />
@@ -245,7 +252,6 @@ export default function AdminOutletRequestPage() {
           )}
         </div>
 
-        {/* Action Bar di bawah tabel [cite: 2026-01-25] */}
         {cart.length > 0 && (
           <div className="p-6 bg-gray-50 border-t">
             <button 
