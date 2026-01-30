@@ -1,16 +1,16 @@
 /* eslint-disable @typescript-eslint/no-explicit-any */
 'use client';
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useCallback } from 'react';
 import Link from 'next/link';
 import { usePathname } from 'next/navigation';
 
-// --- 1. DEFINISI INTERFACE (Menghilangkan Error Gambar 3) ---
+// --- 1. DEFINISI INTERFACE ---
 interface NavItem {
   name: string;
   path: string;
   icon: string;
-  badge?: number;   // Optional: hanya untuk Purchasing
-  empty?: boolean;  // Optional: untuk menu yang masih kosong
+  badge?: number;
+  empty?: boolean;
 }
 
 interface NavGroup {
@@ -22,21 +22,46 @@ export default function DashboardLayout({ children }: { children: React.ReactNod
   const pathname = usePathname();
   const [prCount, setPrCount] = useState(0);
 
-  useEffect(() => {
-    const fetchNotifications = async () => {
-      try {
-        const res = await fetch(`http://localhost:3000/purchasing/pr/pending`); 
-        const data = await res.json();
-        const pendingItems = data.filter((item: any) => !item.isChecked).length;
-        setPrCount(pendingItems);
-      } catch (err) {
-        console.error("Gagal mengambil notifikasi", err);
-      }
-    };
-    fetchNotifications();
+  // Bungkus fetch dalam useCallback agar bisa dipanggil berulang dengan efisien
+  const fetchNotifications = useCallback(async () => {
+    try {
+      // Tambahkan timestamp agar browser tidak melakukan caching pada request API
+      const res = await fetch(`http://localhost:3000/purchasing/pr/pending?t=${Date.now()}`); 
+      const data = await res.json();
+      
+      // Hitung item yang belum diproses (status selain PROCESSED atau isChecked: false)
+      const pendingItems = data.filter((item: any) => !item.isChecked).length;
+      
+      // Update state hanya jika jumlahnya berubah untuk menghemat render
+      setPrCount(pendingItems);
+    } catch (err) {
+      console.error("Gagal mengambil notifikasi", err);
+    }
   }, []);
 
-  // --- 2. DATA NAVIGASI DENGAN TIPE DATA EXPLICIT ---
+  useEffect(() => {
+  let isMounted = true; // Guard untuk mencegah update state jika komponen sudah unmount
+
+  const triggerFetch = async () => {
+    if (isMounted) {
+      await fetchNotifications();
+    }
+  };
+
+  // 1. Jalankan fetch pertama kali
+  triggerFetch();
+
+  // 2. Setup Polling setiap 5 detik
+  const interval = setInterval(triggerFetch, 5000);
+
+  // 3. Cleanup function
+  return () => {
+    isMounted = false;
+    clearInterval(interval);
+  };
+}, [fetchNotifications]);
+
+  // --- 2. DATA NAVIGASI ---
   const navigation: NavGroup[] = [
     {
       group: 'ADMIN OUTLET',
@@ -53,6 +78,7 @@ export default function DashboardLayout({ children }: { children: React.ReactNod
         { name: 'Monitor Receiving', path: '/dashboard/purchasing/receiving', icon: '🔍' },
       ]
     },
+    // ... group lainnya tetap sama
     {
       group: 'FINANCE & ANALYST',
       items: [
@@ -71,7 +97,7 @@ export default function DashboardLayout({ children }: { children: React.ReactNod
 
   return (
     <div className="flex h-screen bg-gray-100 font-sans">
-      {/* Sidebar Modern [cite: 2026-01-25] */}
+      {/* Sidebar */}
       <aside className="w-72 bg-slate-900 text-white flex flex-col shadow-2xl">
         <div className="p-8 text-2xl font-black border-b border-slate-800 tracking-tighter">
           🍞 <span className="text-orange-500">Camden</span> Group
@@ -87,7 +113,7 @@ export default function DashboardLayout({ children }: { children: React.ReactNod
                 {section.items.map((item) => (
                   <Link 
                     key={item.path} 
-                    href={item.empty ? '#' : item.path} // Cegah navigasi jika menu kosong
+                    href={item.empty ? '#' : item.path}
                     className={`flex items-center justify-between p-3 rounded-xl transition-all duration-200 group ${
                       pathname === item.path 
                         ? 'bg-orange-600 shadow-lg shadow-orange-900/20 text-white' 
@@ -98,9 +124,8 @@ export default function DashboardLayout({ children }: { children: React.ReactNod
                       <span className="text-lg">{item.icon}</span>
                       <span className="text-sm font-bold tracking-tight">{item.name}</span>
                     </div>
-                    {/* Badge Notifikasi */}
                     {item.badge !== undefined && item.badge > 0 && (
-                      <span className="bg-red-500 text-white text-[10px] font-black px-2 py-1 rounded-lg">
+                      <span className="bg-red-500 text-white text-[10px] font-black px-2 py-1 rounded-lg animate-bounce-short">
                         {item.badge}
                       </span>
                     )}
@@ -119,13 +144,13 @@ export default function DashboardLayout({ children }: { children: React.ReactNod
             </div>
             <div>
               <p className="text-xs font-black text-white uppercase tracking-wider">Super Admin</p>
-              <p className="text-[10px] text-emerald-400 font-bold">● System Online</p>
+              <p className="text-[10px] text-emerald-400 font-bold">● Live Sync Active</p>
             </div>
           </div>
         </div>
       </aside>
 
-      {/* Main Content Area [cite: 2026-01-25] */}
+      {/* Main Content Area */}
       <main className="flex-1 flex flex-col overflow-hidden">
         <header className="h-20 bg-white border-b flex items-center justify-between px-10 shadow-sm z-10">
           <div>
@@ -138,12 +163,17 @@ export default function DashboardLayout({ children }: { children: React.ReactNod
           </div>
 
           <div className="flex items-center gap-6">
-            <div className="flex items-center gap-2 px-4 py-2 bg-gray-50 rounded-2xl border border-gray-100">
+            <div className="flex items-center gap-2 px-4 py-2 bg-emerald-50 rounded-2xl border border-emerald-100">
               <span className="w-2 h-2 bg-emerald-500 rounded-full animate-pulse"></span>
-              <span className="text-xs font-black text-gray-500 uppercase tracking-tighter">Live Status</span>
+              <span className="text-xs font-black text-emerald-700 uppercase tracking-tighter">Live Sync</span>
             </div>
             <button className="p-3 hover:bg-gray-100 rounded-2xl relative text-xl transition-colors">
-              🔔 {prCount > 0 && <span className="absolute top-3 right-3 w-2.5 h-2.5 bg-red-500 border-2 border-white rounded-full"></span>}
+              🔔 {prCount > 0 && (
+                <span className="absolute top-3 right-3 flex h-3 w-3">
+                  <span className="animate-ping absolute inline-flex h-full w-full rounded-full bg-red-400 opacity-75"></span>
+                  <span className="relative inline-flex rounded-full h-3 w-3 bg-red-500 border-2 border-white"></span>
+                </span>
+              )}
             </button>
           </div>
         </header>

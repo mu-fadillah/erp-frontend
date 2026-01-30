@@ -37,7 +37,6 @@ export default function PurchasingPODashboardPage() {
 
   const fetchSuppliers = async () => {
     try {
-      // Pastikan endpoint ini sesuai dengan backend Anda (bisa /supplier atau /purchasing/suppliers)
       const res = await fetch(`${API_URL}/supplier`); 
       const data = await res.json();
       setAllSuppliers(data);
@@ -63,7 +62,8 @@ export default function PurchasingPODashboardPage() {
         poId: po.id,
         poStatus: po.status, 
         orderNumber: po.orderNumber,
-        outletNote: it.notes 
+        // AMBIL NOTE DARI prItem (Note asli outlet) ATAU it.notes (Note PO)
+        outletNote: it.prItem?.notes || it.notes 
       }));
 
       groups[sName].items.push(...itemsWithMeta);
@@ -87,7 +87,7 @@ export default function PurchasingPODashboardPage() {
       if (res.ok) {
         setIsModalOpen(false);
         setTargetItem(null);
-        await fetchPOList(); // Refresh data agar item pindah group
+        await fetchPOList();
       } else {
         const errData = await res.json();
         alert("Gagal: " + errData.message);
@@ -138,9 +138,10 @@ export default function PurchasingPODashboardPage() {
               {group.hasPendingDrafts && (
                 <button 
                   onClick={() => handleFinalizeAndSend(group.supplierName)}
-                  className="bg-emerald-600 text-white px-10 py-4 rounded-2xl font-black shadow-lg hover:bg-emerald-700 transition-all"
+                  disabled={!!sendingSupplier}
+                  className="bg-emerald-600 text-white px-10 py-4 rounded-2xl font-black shadow-lg hover:bg-emerald-700 transition-all disabled:bg-gray-300"
                 >
-                  Terbitkan & Simpan Harga
+                  {sendingSupplier === group.supplierName ? 'Memproses...' : 'Terbitkan & Simpan Harga'}
                 </button>
               )}
             </div>
@@ -149,33 +150,42 @@ export default function PurchasingPODashboardPage() {
               {group.items.map((item: any) => {
                 const isDraft = item.poStatus === 'PENDING';
                 return (
-                  <div key={item.id} className="relative p-6 rounded-[35px] bg-gray-50 border-2 border-transparent hover:border-gray-200 hover:bg-white transition-all duration-300">
-                    <div className={`absolute top-0 left-10 right-10 h-1.5 rounded-b-full ${isDraft ? 'bg-amber-400' : 'bg-emerald-500'}`} />
-                    
-                    <div className="flex justify-between items-start mb-4">
-                       <span className={`text-[10px] font-black px-3 py-1 rounded-full uppercase ${isDraft ? 'bg-amber-100 text-amber-700' : 'bg-emerald-100 text-emerald-700'}`}>
-                        {isDraft ? '🟡 DRAFT' : '🟢 OFFICIAL'}
-                      </span>
-                      {/* Pindah Supplier tersedia untuk DRAFT maupun OFFICIAL */}
-                      <button 
-                        onClick={() => { setTargetItem(item); setIsModalOpen(true); }}
-                        className="text-[10px] font-black text-blue-600 hover:text-blue-800 uppercase bg-blue-50 px-2 py-1 rounded-lg"
-                      >
-                        Pindah ⇄
-                      </button>
-                    </div>
+                  <div key={item.id} className="relative p-6 rounded-[35px] bg-gray-50 border-2 border-transparent hover:border-gray-200 hover:bg-white transition-all duration-300 flex flex-col justify-between">
+                    <div>
+                      <div className={`absolute top-0 left-10 right-10 h-1.5 rounded-b-full ${isDraft ? 'bg-amber-400' : 'bg-emerald-500'}`} />
+                      
+                      <div className="flex justify-between items-start mb-4">
+                        <span className={`text-[10px] font-black px-3 py-1 rounded-full uppercase ${isDraft ? 'bg-amber-100 text-amber-700' : 'bg-emerald-100 text-emerald-700'}`}>
+                          {isDraft ? '🟡 DRAFT' : '🟢 OFFICIAL'}
+                        </span>
+                        <button 
+                          onClick={() => { setTargetItem(item); setIsModalOpen(true); }}
+                          className="text-[10px] font-black text-blue-600 hover:text-blue-800 uppercase bg-blue-50 px-2 py-1 rounded-lg"
+                        >
+                          Pindah ⇄
+                        </button>
+                      </div>
 
-                    <h4 className="text-lg font-black text-gray-800 leading-tight mb-2 uppercase">{item.product?.name}</h4>
-                    
-                    <div className="mt-4 mb-4">
-                      <label className="text-[10px] font-bold text-gray-400 uppercase">Harga Satuan (Rp)</label>
-                      <input 
-                        type="text"
-                        disabled={!isDraft}
-                        className="w-full mt-1 p-3 bg-white border-2 border-gray-200 rounded-xl font-black text-emerald-600 focus:border-emerald-500 outline-none transition-all"
-                        value={itemPrices[item.id] ? itemPrices[item.id].toLocaleString('id-ID') : ''}
-                        onChange={(e) => handlePriceChange(item.id, e.target.value)}
-                      />
+                      <h4 className="text-lg font-black text-gray-800 leading-tight mb-1 uppercase">{item.product?.name}</h4>
+                      
+                      {/* TAMPILAN NOTES DARI OUTLET */}
+                      {item.outletNote && (
+                        <div className="mb-4 p-2 bg-blue-50/50 rounded-lg border border-blue-100">
+                           <p className="text-[9px] font-black text-blue-400 uppercase mb-0.5">Note dari Outlet:</p>
+                           <p className="text-xs italic text-blue-700">"{item.outletNote}"</p>
+                        </div>
+                      )}
+                      
+                      <div className="mt-4 mb-4">
+                        <label className="text-[10px] font-bold text-gray-400 uppercase">Harga Satuan (Rp)</label>
+                        <input 
+                          type="text"
+                          disabled={!isDraft}
+                          className="w-full mt-1 p-3 bg-white border-2 border-gray-200 rounded-xl font-black text-emerald-600 focus:border-emerald-500 outline-none transition-all"
+                          value={itemPrices[item.id] ? itemPrices[item.id].toLocaleString('id-ID') : ''}
+                          onChange={(e) => handlePriceChange(item.id, e.target.value)}
+                        />
+                      </div>
                     </div>
 
                     <div className="flex items-center justify-between pt-4 border-t">
@@ -189,7 +199,7 @@ export default function PurchasingPODashboardPage() {
         ))}
       </div>
 
-      {/* MODAL PINDAH SUPPLIER */}
+      {/* MODAL PINDAH SUPPLIER TETAP SAMA */}
       {isModalOpen && (
         <div className="fixed inset-0 bg-black/60 backdrop-blur-sm z-[100] flex items-center justify-center p-6">
           <div className="bg-white w-full max-w-md rounded-[40px] p-10 shadow-2xl animate-in zoom-in-95 duration-200">
