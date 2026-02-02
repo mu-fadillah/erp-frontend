@@ -1,261 +1,290 @@
 /* eslint-disable react/no-unescaped-entities */
 /* eslint-disable @typescript-eslint/no-explicit-any */
 'use client';
-import { useState, useEffect } from 'react';
+import { useState, useEffect, useMemo } from 'react';
 import { useRouter } from 'next/navigation';
+import { 
+  ChevronDown, 
+  ShoppingCart, 
+  CheckCircle2, 
+  Loader2, 
+  AlertCircle,
+  History
+} from 'lucide-react';
 
 export default function PurchasingPRListPage() {
   const [prItems, setPrItems] = useState<any[]>([]);
   const [suppliers, setSuppliers] = useState<any[]>([]);
   const [loading, setLoading] = useState(true);
-  
+  const [actionLoading, setActionLoading] = useState(false);
+  const [expandedGroups, setExpandedGroups] = useState<Record<string, boolean>>({
+    BAR: true,
+    KITCHEN: true,
+    OTHER: false
+  });
+
   const router = useRouter(); 
   const API_URL = 'http://localhost:3000';
 
   useEffect(() => {
     const initData = async () => {
       setLoading(true);
-      await fetchSuppliers();
-      await fetchPRItems();
-      setLoading(false);
+      try {
+        await Promise.all([fetchSuppliers(), fetchPRItems()]);
+      } finally {
+        setLoading(false);
+      }
     };
     initData();
   }, []);
+
+  const groupedData = useMemo(() => {
+    const groups: Record<string, any[]> = { BAR: [], KITCHEN: [], OTHER: [] };
+    prItems.forEach(item => {
+      const major = item.product?.majorGroup || 'OTHER';
+      if (groups[major]) groups[major].push(item);
+      else groups.OTHER.push(item);
+    });
+    return groups;
+  }, [prItems]);
 
   const fetchPRItems = async () => {
     try {
       const res = await fetch(`${API_URL}/purchasing/pr/pending`);
       const data = await res.json();
-      
-      const formatted = data.map((item: any) => {
-        const currentSupplier = item.lastSupplierName || '';
-        const history = item.priceHistory || [];
-
-        // OTOMATISASI HARGA SAAT LOAD:
-        // Cari harga di history yang supplierName-nya cocok dengan lastSupplierName
-        const matchedHistory = history.find(
-          (h: any) => h.supplierName?.toLowerCase() === currentSupplier.toLowerCase()
-        );
-
-        return {
-          ...item,
-          productId: item.productId,
-          supplierName: currentSupplier,
-          // Jika cocok, pakai harga history. Jika tidak ada history, baru default ke 0.
-          price: matchedHistory ? matchedHistory.price : 0,
-          priceHistory: history
-        };
-      });
-      setPrItems(formatted);
-    } catch (err) { 
-      console.error("Gagal mengambil data PR:", err); 
-    }
+      setPrItems(data.map((item: any) => ({
+        ...item,
+        supplierName: item.lastSupplierName || '',
+        // Default harga diambil dari history terakhir jika ada [cite: 2026-01-28]
+        price: item.priceHistory?.[0]?.price || 0,
+        isChecked: false
+      })));
+    } catch (err) { console.error("Fetch PR error:", err); }
   };
 
   const fetchSuppliers = async () => {
     try {
-      const res = await fetch(`${API_URL}/supplier`); 
+      const res = await fetch(`${API_URL}/purchasing/suppliers`);
       const data = await res.json();
       setSuppliers(data);
-    } catch (err) { 
-      console.error("Gagal mengambil data supplier:", err); 
-    }
+    } catch (err) { console.error("Fetch Suppliers error:", err); }
   };
 
-  const handleSupplierChange = (itemId: string, newSupplierName: string) => {
-    setPrItems(prev => prev.map(item => {
-      if (item.id === itemId) {
-        // Cari di priceHistory saat user mengetik supplier baru
-        const historyForThisSupplier = item.priceHistory?.find(
-          (h: any) => h.supplierName?.toLowerCase() === newSupplierName.toLowerCase()
-        );
-
-        return { 
-          ...item, 
-          supplierName: newSupplierName,
-          price: historyForThisSupplier ? historyForThisSupplier.price : 0
-        };
-      }
-      return item;
-    }));
-  };
-
-  const updatePriceManual = (id: string, value: string) => {
-    // Menggunakan parseFloat agar mendukung desimal
-    const numValue = parseFloat(value) || 0;
+  const updateItemState = (id: string, field: string, value: any) => {
     setPrItems(prev => prev.map(item => 
-      item.id === id ? { ...item, price: numValue } : item
+      item.id === id ? { ...item, [field]: value } : item
     ));
-  };
-
-  const toggleItemCheck = async (id: string, currentStatus: boolean) => {
-    try {
-      // Optimistic Update
-      setPrItems(prev => prev.map(item => 
-        item.id === id ? { ...item, isChecked: !currentStatus } : item
-      ));
-
-      await fetch(`${API_URL}/purchasing/pr/item/${id}/check`, {
-        method: 'PATCH',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ isChecked: !currentStatus }),
-      });
-    } catch (err) {
-      console.error("Gagal sinkron status ceklis:", err);
-      fetchPRItems(); // Rollback jika gagal
-    }
   };
 
   const handleCreatePOMassal = async () => {
     const selectedItems = prItems.filter((i: any) => i.isChecked);
-    if (selectedItems.length === 0) return;
-
-    const missingSupplier = selectedItems.filter(i => !i.supplierName || i.supplierName.trim() === "");
-    if (missingSupplier.length > 0) {
-      alert(`Ada ${missingSupplier.length} item yang belum diisi Supplier-nya!`);
+    
+    // Validasi data sebelum kirim ke CreatePOMassalDto [cite: 2026-02-02]
+    const invalidItems = selectedItems.filter(i => !i.supplierName || !i.price || i.price <= 0);
+    
+    if (invalidItems.length > 0) {
+      alert(`Mohon lengkapi Supplier dan Harga (minimal > 0) untuk ${invalidItems.length} item.`);
       return;
     }
 
-    setLoading(true);
+    setActionLoading(true);
     try {
       const res = await fetch(`${API_URL}/purchasing/po/create-massal`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
+        body: JSON.stringify({ 
           items: selectedItems.map(i => ({
             id: i.id,
             productId: i.productId,
-            supplierName: i.supplierName,
-            price: Number(i.price),
             quantity: i.quantity,
             uom: i.uom,
-            notes: i.notes || ''
+            supplierName: i.supplierName,
+            price: Number(i.price),
+            notes: i.notes
           }))
         }),
       });
 
-      const result = await res.json();
-
       if (res.ok) {
-        alert("Purchase Order Berhasil Dibuat!");
-        router.push('/dashboard/purchasing/po');
+        // Berhasil membuat Draft PO, arahkan ke Monitoring [cite: 2026-01-28]
+        router.push('/dashboard/purchasing/pr');
       } else {
-        alert("Gagal: " + (result.message || "Terjadi kesalahan server"));
+        const errData = await res.json();
+        alert(`Gagal: ${errData.message || 'Terjadi kesalahan sistem'}`);
       }
     } catch (err) {
-      console.error(err);
-      alert("Gagal koneksi ke server");
-    } finally { 
-      setLoading(false); 
+      alert("Koneksi ke server terputus.");
+    } finally {
+      setActionLoading(false);
     }
   };
 
+  const formatRupiah = (val: number | string) => {
+    if (!val || val === 0) return '';
+    return val.toString().replace(/\B(?=(\d{3})+(?!\d))/g, ".");
+  };
+
+  if (loading) {
+    return (
+      <div className="flex flex-col items-center justify-center min-h-screen bg-slate-50 gap-3">
+        <Loader2 className="animate-spin text-blue-600" size={40} />
+        <p className="text-slate-500 font-medium">Memuat Permintaan Barang...</p>
+      </div>
+    );
+  }
+
+  const renderTable = (title: string, data: any[], groupKey: string) => {
+    const isExpanded = expandedGroups[groupKey];
+    if (data.length === 0) return null;
+
+    return (
+      <div className="mb-6 bg-white rounded-2xl border border-slate-200 shadow-sm overflow-hidden">
+        <button 
+          onClick={() => setExpandedGroups(prev => ({ ...prev, [groupKey]: !isExpanded }))}
+          className="w-full px-6 py-4 flex items-center justify-between bg-slate-50/50 hover:bg-slate-50 transition-colors"
+        >
+          <div className="flex items-center gap-3">
+            <div className={`w-1.5 h-6 rounded-full ${
+              groupKey === 'BAR' ? 'bg-blue-500' : groupKey === 'KITCHEN' ? 'bg-rose-500' : 'bg-slate-400'
+            }`} />
+            <div className="text-left">
+              <h2 className="text-sm font-bold text-slate-800 tracking-tight">{title}</h2>
+              <p className="text-[11px] text-slate-500 font-medium uppercase tracking-wider">{data.length} Items</p>
+            </div>
+          </div>
+          <ChevronDown className={`w-4 h-4 text-slate-400 transition-transform ${isExpanded ? 'rotate-180' : ''}`} />
+        </button>
+
+        <div className={isExpanded ? 'block' : 'hidden'}>
+          <div className="overflow-x-auto">
+            <table className="w-full text-left border-collapse">
+              <thead className="bg-white border-b border-slate-100 text-[10px] uppercase font-bold text-slate-400 tracking-widest">
+                <tr>
+                  <th className="px-6 py-4 w-12 text-center">Select</th>
+                  <th className="px-6 py-4">Product Detail</th>
+                  <th className="px-6 py-4 text-center">Inventory</th>
+                  <th className="px-6 py-4 text-center">Req Qty</th>
+                  <th className="px-6 py-4 w-44">Price Estimate</th>
+                  <th className="px-6 py-4 w-52">Supplier Target</th>
+                </tr>
+              </thead>
+              <tbody className="divide-y divide-slate-50">
+                {data.map((item) => (
+                  <tr key={item.id} className={`group transition-all ${item.isChecked ? 'bg-blue-50/40' : 'hover:bg-slate-50/50'}`}>
+                    <td className="px-6 py-4 text-center">
+                      <input 
+                        type="checkbox" 
+                        className="w-4 h-4 rounded-md border-slate-300 text-blue-600 focus:ring-blue-500 cursor-pointer transition-transform group-hover:scale-110" 
+                        checked={item.isChecked} 
+                        onChange={() => updateItemState(item.id, 'isChecked', !item.isChecked)}
+                      />
+                    </td>
+                    <td className="px-6 py-4">
+                      <div className="flex flex-col">
+                        <span className="font-bold text-slate-700 text-xs uppercase">{item.product?.name}</span>
+                        <span className="text-[10px] text-slate-400 mt-1 uppercase font-medium">SKU: {item.product?.sku}</span>
+                        {item.notes && (
+                          <div className="mt-2 flex items-start gap-1 text-[11px] text-amber-600 bg-amber-50 p-1.5 rounded-lg border border-amber-100">
+                            <AlertCircle size={12} className="mt-0.5 shrink-0" />
+                            <span>{item.notes}</span>
+                          </div>
+                        )}
+                      </div>
+                    </td>
+                    <td className="px-6 py-4 text-center">
+                      <div className="inline-flex flex-col items-center px-2 py-1 bg-slate-100 rounded-lg min-w-[50px]">
+                        <span className="text-xs font-bold text-slate-600">{item.currentStock}</span>
+                        <span className="text-[9px] text-slate-400 font-bold uppercase">Stock</span>
+                      </div>
+                    </td>
+                    <td className="px-6 py-4 text-center">
+                      <div className="flex items-baseline justify-center gap-1">
+                        <span className="text-sm font-black text-slate-800">{item.quantity}</span>
+                        <span className="text-[10px] font-bold text-slate-400 uppercase">{item.uom}</span>
+                      </div>
+                    </td>
+                    <td className="px-6 py-4">
+                      <div className="relative">
+                        <span className="absolute left-3 top-1/2 -translate-y-1/2 text-[10px] font-bold text-slate-400">Rp</span>
+                        <input 
+                          type="text" 
+                          className="w-full pl-8 pr-3 py-2 bg-white border border-slate-200 rounded-xl text-xs font-bold text-slate-700 focus:border-blue-500 focus:ring-4 focus:ring-blue-500/10 outline-none transition-all shadow-sm"
+                          placeholder="0"
+                          value={formatRupiah(item.price)}
+                          onChange={(e) => updateItemState(item.id, 'price', e.target.value.replace(/\./g, ''))}
+                        />
+                      </div>
+                      {item.priceHistory?.length > 0 && (
+                        <div className="mt-1.5 flex items-center gap-1 text-[9px] text-slate-400 italic">
+                          <History size={10} />
+                          Last Price: Rp {formatRupiah(item.priceHistory[0].price)}
+                        </div>
+                      )}
+                    </td>
+                    <td className="px-6 py-4">
+                      <div className="relative">
+                        <input 
+                          list="supplier-options" 
+                          className="w-full px-3 py-2 bg-white border border-slate-200 rounded-xl text-xs font-medium text-slate-700 focus:border-blue-500 focus:ring-4 focus:ring-blue-500/10 outline-none transition-all shadow-sm"
+                          placeholder="Pilih Supplier..."
+                          value={item.supplierName}
+                          onChange={(e) => updateItemState(item.id, 'supplierName', e.target.value)}
+                        />
+                      </div>
+                    </td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </div>
+        </div>
+      </div>
+    );
+  };
+
   return (
-    <div className="p-6 max-w-[1600px] mx-auto bg-gray-50/50 min-h-screen">
-      <datalist id="supplier-list">
-        {suppliers.map((s: any) => (
-          <option key={s.id} value={s.name} />
-        ))}
+    <div className="p-8 max-w-[1600px] mx-auto bg-slate-50 min-h-screen">
+      <datalist id="supplier-options">
+        {suppliers.map((s: any) => <option key={s.id} value={s.name} />)}
       </datalist>
 
-      <div className="mb-6">
-        <h1 className="text-2xl font-black text-gray-900 tracking-tight">Purchase Request List</h1>
-        <p className="text-gray-500 font-medium text-sm">Review dan tentukan supplier sebelum proses PO.</p>
+      <div className="flex justify-between items-end mb-10">
+        <div className="space-y-1">
+          <div className="flex items-center gap-2 text-blue-600 mb-2">
+            <div className="bg-blue-600 p-1.5 rounded-lg">
+              <ShoppingCart size={16} className="text-white" />
+            </div>
+            <span className="text-[11px] font-black uppercase tracking-[0.2em]">Supply Chain Management</span>
+          </div>
+          <h1 className="text-3xl font-black text-slate-900 tracking-tight">Purchase Request</h1>
+          <p className="text-sm text-slate-500 font-medium">Review and process outlet requests into draft purchase orders.</p>
+        </div>
       </div>
 
-      <div className="bg-white border border-gray-200 rounded-3xl shadow-sm overflow-hidden">
-        <table className="w-full text-xs">
-          <thead>
-            <tr className="bg-gray-100 text-gray-600 border-b">
-              <th className="p-4 w-14 text-center">PILIH</th>
-              <th className="p-4 text-left font-bold uppercase tracking-wider">Item & Note Outlet</th>
-              <th className="p-4 text-center font-bold uppercase tracking-wider">Stok</th>
-              <th className="p-4 text-center font-bold uppercase tracking-wider">Qty</th>
-              <th className="p-4 text-center font-bold uppercase tracking-wider">UOM</th>
-              <th className="p-4 text-left font-bold uppercase tracking-wider w-44">Harga Satuan (Rp)</th>
-              <th className="p-4 text-left font-bold uppercase tracking-wider w-56">Supplier</th>
-            </tr>
-          </thead>
-          <tbody className="divide-y divide-gray-100">
-            {prItems.length === 0 && !loading && (
-              <tr>
-                <td colSpan={7} className="p-10 text-center text-gray-400 font-medium">
-                  Tidak ada permintaan pending saat ini.
-                </td>
-              </tr>
-            )}
-            {prItems.map((item: any) => (
-              <tr key={item.id} className={`${item.isChecked ? 'bg-orange-50/30' : ''} transition-all`}>
-                <td className="p-4 text-center">
-                  <input 
-                    type="checkbox" 
-                    className="w-5 h-5 accent-orange-600 cursor-pointer"
-                    checked={item.isChecked || false}
-                    onChange={() => toggleItemCheck(item.id, item.isChecked)}
-                  />
-                </td>
-                <td className="p-4">
-                  <div className="space-y-1">
-                    <p className="font-bold text-gray-800 text-sm uppercase">{item.product?.name}</p>
-                    <span className="text-[9px] text-blue-600 font-bold bg-blue-50 px-2 py-0.5 rounded uppercase">
-                      {item.product?.category?.name}
-                    </span>
-                    {item.notes && (
-                      <div className="mt-1 bg-amber-50/50 border-l-2 border-amber-300 p-2 rounded-r-lg">
-                        <p className="text-[11px] text-amber-800 italic leading-tight">
-                          "{item.notes}"
-                        </p>
-                      </div>
-                    )}
-                  </div>
-                </td>
-                <td className="p-4 text-center font-bold text-gray-400">{item.currentStock}</td>
-                <td className="p-4 text-center text-lg font-black text-orange-600">{item.quantity}</td>
-                <td className="p-4 text-center font-bold text-gray-400 uppercase">{item.uom}</td>
-                
-                <td className="p-4">
-                  <input 
-                    type="number"
-                    step="any"
-                    className="w-full p-2 bg-gray-50 border border-gray-200 rounded-xl focus:bg-white focus:border-emerald-500 outline-none font-bold text-emerald-600 transition-all shadow-sm"
-                    value={item.price || 0}
-                    onChange={(e) => updatePriceManual(item.id, e.target.value)}
-                  />
-                </td>
-
-                <td className="p-4">
-                  <input 
-                    list="supplier-list"
-                    className="w-full p-2 bg-gray-50 border border-gray-200 rounded-xl focus:bg-white focus:border-orange-500 outline-none font-bold text-gray-800 transition-all shadow-sm"
-                    placeholder="Pilih Supplier..."
-                    value={item.supplierName}
-                    onChange={(e) => handleSupplierChange(item.id, e.target.value)}
-                  />
-                  <p className="text-[9px] font-bold text-gray-400 mt-1 uppercase ml-1">
-                    {item.lastSupplierName === item.supplierName ? 'Riwayat Terakhir' : 'Supplier Baru'}
-                  </p>
-                </td>
-              </tr>
-            ))}
-          </tbody>
-        </table>
+      <div className="space-y-6">
+        {renderTable('Bar Department', groupedData.BAR, 'BAR')}
+        {renderTable('Kitchen Department', groupedData.KITCHEN, 'KITCHEN')}
+        {renderTable('General & Others', groupedData.OTHER, 'OTHER')}
       </div>
 
-      {/* Floating Action Bar */}
+      {/* Floating Action Menu */}
       {prItems.some((i: any) => i.isChecked) && (
-        <div className="fixed bottom-6 left-1/2 -translate-x-1/2 bg-gray-900 text-white p-4 px-8 rounded-2xl shadow-2xl flex items-center gap-10 animate-in fade-in slide-in-from-bottom-5 z-50">
-          <div className="flex flex-col">
-            <span className="text-[10px] text-gray-400 uppercase font-black tracking-widest">Siap Proses</span>
-            <p className="text-lg font-black text-orange-400 leading-none">
-              {prItems.filter((i: any) => i.isChecked).length} Item
-            </p>
+        <div className="fixed bottom-10 right-10 flex items-center gap-4 bg-slate-900 p-4 rounded-3xl shadow-[0_20px_50px_rgba(0,0,0,0.3)] border border-slate-800 animate-in slide-in-from-bottom-10">
+          <div className="px-4 border-r border-slate-700">
+            <p className="text-[10px] text-slate-400 font-bold uppercase tracking-wider">Selected Items</p>
+            <p className="text-xl font-black text-white">{prItems.filter(i => i.isChecked).length}</p>
           </div>
           <button 
-            onClick={handleCreatePOMassal}
-            disabled={loading}
-            className="bg-orange-600 hover:bg-orange-700 text-white px-8 py-3 rounded-xl font-bold text-sm transition-all flex items-center gap-2"
+            onClick={handleCreatePOMassal} 
+            disabled={actionLoading}
+            className="flex items-center gap-3 bg-blue-600 hover:bg-blue-500 text-white px-8 py-4 rounded-2xl font-bold text-sm transition-all active:scale-95 disabled:opacity-50 disabled:cursor-not-allowed group"
           >
-            {loading ? 'Processing...' : 'Buat PO Sekarang ➔'}
+            {actionLoading ? (
+              <Loader2 className="animate-spin" size={18} />
+            ) : (
+              <CheckCircle2 size={18} className="group-hover:scale-110 transition-transform" />
+            )}
+            {actionLoading ? 'Creating Drafts...' : 'Create Mass PO Draft'}
           </button>
         </div>
       )}
