@@ -4,10 +4,11 @@
 import React, { useState, useEffect, useRef } from 'react';
 import { 
   Search, Plus, Edit2, Trash2, X, LayoutGrid, Check, 
-  ChevronDown, ChevronUp, Download, FileText, Table as TableIcon 
+  ChevronDown, ChevronUp, Download, FileText, Table as TableIcon,
+  FileUp, AlertCircle, Loader2, FileSpreadsheet
 } from 'lucide-react';
 
-// Import Library Export
+// Import Library
 import * as XLSX from 'xlsx';
 import jsPDF from 'jspdf';
 import autoTable from 'jspdf-autotable';
@@ -19,9 +20,10 @@ export default function InventoryPage() {
   const [isSubmitting, setIsSubmitting] = useState(false);
   const [isTableExpanded, setIsTableExpanded] = useState(true);
   
-  // Export & UI States
+  // UI States
   const [showExportMenu, setShowExportMenu] = useState(false);
   const exportMenuRef = useRef<HTMLDivElement>(null);
+  const fileInputRef = useRef<HTMLInputElement>(null);
 
   // Modal & Form States
   const [showModal, setShowModal] = useState(false);
@@ -45,7 +47,6 @@ export default function InventoryPage() {
 
   useEffect(() => {
     fetchData();
-    // Close dropdown on click outside
     const handleClickOutside = (event: MouseEvent) => {
       if (exportMenuRef.current && !exportMenuRef.current.contains(event.target as Node)) {
         setShowExportMenu(false);
@@ -71,8 +72,93 @@ export default function InventoryPage() {
     }
   };
 
+  // --- LOGIKA AUTO CODING (C00xxxx) ---
+  const generateNextSKU = (lastSKU: string | null) => {
+    const prefix = "C00";
+    if (!lastSKU || !lastSKU.startsWith(prefix)) return `${prefix}0001`;
+    
+    const lastNumber = parseInt(lastSKU.replace(prefix, ''));
+    const nextNumber = lastNumber + 1;
+    return `${prefix}${nextNumber.toString().padStart(4, '0')}`;
+  };
+
+  // --- LOGIKA DOWNLOAD TEMPLATE ---
+  const handleDownloadTemplate = () => {
+    const templateData = [
+      {
+        'Nama Item': 'COLA',
+        'Group': 'BEVERAGES',
+        'Harga': 0,
+        'Satuan': 'PCS',
+        'Stok Awal': 0
+      }
+    ];
+    
+    const worksheet = XLSX.utils.json_to_sheet(templateData);
+    const workbook = XLSX.utils.book_new();
+    XLSX.utils.book_append_sheet(workbook, worksheet, "Template_Import");
+    
+    // Set column widths
+    worksheet['!cols'] = [{ wch: 30 }, { wch: 15 }, { wch: 10 }, { wch: 10 }, { wch: 10 }];
+    
+    XLSX.writeFile(workbook, "Template_Import_Inventory.xlsx");
+  };
+
+  // --- LOGIKA IMPORT EXCEL ---
+  const handleImportExcel = (e: React.ChangeEvent<HTMLInputElement>) => {
+    const file = e.target.files?.[0];
+    if (!file) return;
+
+    const reader = new FileReader();
+    reader.onload = async (evt) => {
+      try {
+        const bstr = evt.target?.result;
+        const wb = XLSX.read(bstr, { type: 'binary' });
+        const ws = wb.Sheets[wb.SheetNames[0]];
+        const data: any[] = XLSX.utils.sheet_to_json(ws);
+
+        if (data.length === 0) return alert("File Excel kosong!");
+
+        let currentLastSKU = products.length > 0 
+          ? [...products].sort((a, b) => b.sku.localeCompare(a.sku))[0].sku 
+          : "C000000";
+
+        const formattedPayload = data.map((row: any) => {
+          const newSKU = generateNextSKU(currentLastSKU);
+          currentLastSKU = newSKU;
+
+          const group = itemGroups.find(g => g.name.toLowerCase() === (row['Group'] || '').toLowerCase());
+
+          return {
+            sku: newSKU,
+            name: row['Nama Item'],
+            itemGroupId: group?.id || itemGroups[0]?.id,
+            buyPrice: Number(row['Harga']) || 0,
+            uom: row['Satuan'] || 'PCS',
+            qty: Number(row['Stok Awal']) || 0
+          };
+        });
+
+        const res = await fetch('http://localhost:3000/product/bulk', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify(formattedPayload)
+        });
+
+        if (res.ok) {
+          alert(`Berhasil mengimpor ${formattedPayload.length} item!`);
+          fetchData();
+        }
+      } catch (err) {
+        alert("Gagal memproses file. Pastikan header sesuai template.");
+      } finally {
+        if (fileInputRef.current) fileInputRef.current.value = '';
+      }
+    };
+    reader.readAsBinaryString(file);
+  };
+
   // --- LOGIKA EXPORT ---
-  
   const getExportData = () => {
     return filteredProducts.map(p => ({
       'Kode Item': p.sku,
@@ -90,39 +176,25 @@ export default function InventoryPage() {
     const worksheet = XLSX.utils.json_to_sheet(data);
     const workbook = XLSX.utils.book_new();
     XLSX.utils.book_append_sheet(workbook, worksheet, "Inventory");
-    
-    // Set column widths for better readability
-    worksheet['!cols'] = [{ wch: 15 }, { wch: 30 }, { wch: 20 }, { wch: 15 }, { wch: 15 }, { wch: 10 }, { wch: 10 }];
-    
     XLSX.writeFile(workbook, `Inventory_Report_${new Date().getTime()}.xlsx`);
     setShowExportMenu(false);
   };
 
   const handleExportPDF = () => {
-    const doc = new jsPDF('l', 'mm', 'a4'); // Landscape orientation
+    const doc = new jsPDF('l', 'mm', 'a4');
     const data = getExportData();
     const headers = [['Kode Item', 'Nama Item', 'Item Group', 'Major Group', 'Harga', 'Stok', 'UOM']];
     const body = data.map(item => Object.values(item));
-
-    doc.setFontSize(16);
-    doc.text("Laporan Inventory Barang", 14, 15);
-    doc.setFontSize(10);
-    doc.text(`Dicetak pada: ${new Date().toLocaleString('id-ID')}`, 14, 22);
-
     autoTable(doc, {
       head: headers,
       body: body,
       startY: 30,
       theme: 'grid',
       headStyles: { fillColor: [79, 70, 229], textColor: [255, 255, 255] },
-      styles: { fontSize: 9 },
     });
-
     doc.save(`Inventory_Report_${new Date().getTime()}.pdf`);
     setShowExportMenu(false);
   };
-
-  // --- FORMATTING & HANDLERS ---
 
   const formatCurrency = (value: number) => {
     return new Intl.NumberFormat('id-ID', {
@@ -147,11 +219,17 @@ export default function InventoryPage() {
     try {
       const url = isEdit ? `http://localhost:3000/product/${selectedId}` : 'http://localhost:3000/product';
       const method = isEdit ? 'PATCH' : 'POST';
-      const payload = { ...formData, buyPrice: Number(formData.buyPrice) };
+      
+      const finalPayload = { 
+        ...formData, 
+        buyPrice: Number(formData.buyPrice),
+        ...( !isEdit && { sku: generateNextSKU(products.length > 0 ? products[0].sku : null) } )
+      };
+
       const res = await fetch(url, {
         method,
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify(payload),
+        body: JSON.stringify(finalPayload),
       });
       if (res.ok) {
         setShowModal(false);
@@ -179,46 +257,56 @@ export default function InventoryPage() {
         <div className="flex flex-col md:flex-row md:items-end justify-between gap-6">
           <div className="space-y-1">
             <h1 className="text-3xl font-semibold text-slate-900 tracking-tight">Inventory</h1>
-            <p className="text-slate-500 text-sm font-medium">Kelola ketersediaan bahan dan standar harga operasional.</p>
+            <p className="text-slate-500 text-sm font-medium">Manajemen stok barang dan import data standar.</p>
           </div>
           
-          <div className="flex gap-3 relative" ref={exportMenuRef}>
+          <div className="flex gap-3 relative">
+            <input type="file" ref={fileInputRef} onChange={handleImportExcel} accept=".xlsx, .xls" className="hidden" />
+            
             <button 
-              onClick={() => setShowExportMenu(!showExportMenu)}
+              onClick={() => fileInputRef.current?.click()}
               className="bg-white border border-slate-200 text-slate-600 px-5 py-2.5 rounded-xl font-medium flex items-center gap-2 transition-all hover:bg-slate-50 active:scale-95 shadow-sm"
             >
-              <Download size={18} /> Export <ChevronDown size={14} className={`transition-transform ${showExportMenu ? 'rotate-180' : ''}`} />
+              <FileUp size={18} className="text-indigo-600" /> Import
             </button>
 
-            {/* DROPDOWN MENU */}
-            {showExportMenu && (
-              <div className="absolute top-full right-[145px] mt-2 w-48 bg-white border border-slate-200 rounded-2xl shadow-xl z-[110] overflow-hidden animate-in fade-in zoom-in-95 duration-150">
+            <div className="relative" ref={exportMenuRef}>
                 <button 
-                  onClick={handleExportExcel}
-                  className="w-full px-4 py-3 text-left text-sm text-slate-700 hover:bg-indigo-50 flex items-center gap-3 transition-colors"
+                onClick={() => setShowExportMenu(!showExportMenu)}
+                className="bg-white border border-slate-200 text-slate-600 px-5 py-2.5 rounded-xl font-medium flex items-center gap-2 transition-all hover:bg-slate-50 active:scale-95 shadow-sm"
                 >
-                  <TableIcon size={16} className="text-green-600" /> Excel (.xlsx)
+                <Download size={18} /> Export <ChevronDown size={14} className={`transition-transform ${showExportMenu ? 'rotate-180' : ''}`} />
                 </button>
-                <button 
-                  onClick={handleExportPDF}
-                  className="w-full px-4 py-3 text-left text-sm text-slate-700 hover:bg-indigo-50 flex items-center gap-3 transition-colors border-t border-slate-50"
-                >
-                  <FileText size={16} className="text-red-600" /> PDF Document
-                </button>
-              </div>
-            )}
+
+                {showExportMenu && (
+                <div className="absolute top-full right-0 mt-2 w-48 bg-white border border-slate-200 rounded-2xl shadow-xl z-[110] overflow-hidden animate-in fade-in zoom-in-95 duration-150">
+                    <button onClick={handleExportExcel} className="w-full px-4 py-3 text-left text-sm text-slate-700 hover:bg-indigo-50 flex items-center gap-3 border-b border-slate-50"><TableIcon size={16} className="text-green-600" /> Excel (.xlsx)</button>
+                    <button onClick={handleExportPDF} className="w-full px-4 py-3 text-left text-sm text-slate-700 hover:bg-indigo-50 flex items-center gap-3"><FileText size={16} className="text-red-600" /> PDF Document</button>
+                </div>
+                )}
+            </div>
 
             <button 
-              onClick={() => { 
-                setIsEdit(false); 
-                setFormData({name:'', itemGroupId:'', uom:'PCS', buyPrice: ''}); 
-                setShowModal(true); 
-              }}
+              onClick={() => { setIsEdit(false); setFormData({name:'', itemGroupId:'', uom:'PCS', buyPrice: ''}); setShowModal(true); }}
               className="bg-indigo-600 hover:bg-indigo-700 text-white px-5 py-2.5 rounded-xl font-medium flex items-center gap-2 transition-all shadow-sm active:scale-95"
             >
               <Plus size={18} /> Tambah Item
             </button>
           </div>
+        </div>
+
+        {/* Info Box & Template Download */}
+        <div className="bg-indigo-50/50 border border-indigo-100 p-5 rounded-3xl flex flex-col md:flex-row md:items-center justify-between gap-4">
+           <div className="flex items-center gap-4 text-xs font-medium text-indigo-700">
+             <AlertCircle size={20} className="text-indigo-400" />
+             <p>Gunakan format excel yang benar untuk import data masal. Kode item akan otomatis melanjutkan urutan terakhir.</p>
+           </div>
+           <button 
+             onClick={handleDownloadTemplate}
+             className="flex items-center gap-2 bg-indigo-100 text-indigo-700 px-4 py-2 rounded-xl text-xs font-bold hover:bg-indigo-200 transition-colors"
+           >
+             <FileSpreadsheet size={16} /> DOWNLOAD TEMPLATE
+           </button>
         </div>
 
         {/* Filter Bar */}
@@ -232,19 +320,13 @@ export default function InventoryPage() {
             />
           </div>
           <div className="flex gap-2">
-            <select 
-              className="bg-slate-50 border border-slate-200 rounded-xl px-4 py-2.5 text-sm font-medium text-slate-600 outline-none cursor-pointer"
-              value={filterMajor} onChange={(e) => setFilterMajor(e.target.value)}
-            >
+            <select className="bg-slate-50 border border-slate-200 rounded-xl px-4 py-2.5 text-sm font-medium text-slate-600 outline-none cursor-pointer" value={filterMajor} onChange={(e) => setFilterMajor(e.target.value)}>
               <option value="ALL">Semua Divisi</option>
               <option value="BAR">BAR</option>
               <option value="KITCHEN">KITCHEN</option>
               <option value="OTHER">OTHER</option>
             </select>
-            <select 
-              className="bg-slate-50 border border-slate-200 rounded-xl px-4 py-2.5 text-sm font-medium text-slate-600 outline-none cursor-pointer"
-              value={filterGroup} onChange={(e) => setFilterGroup(e.target.value)}
-            >
+            <select className="bg-slate-50 border border-slate-200 rounded-xl px-4 py-2.5 text-sm font-medium text-slate-600 outline-none cursor-pointer" value={filterGroup} onChange={(e) => setFilterGroup(e.target.value)}>
               <option value="ALL">Semua Group</option>
               {itemGroups.map(g => <option key={g.id} value={g.id}>{g.name}</option>)}
             </select>
@@ -253,10 +335,7 @@ export default function InventoryPage() {
 
         {/* Table Section */}
         <div className="bg-white rounded-2xl shadow-sm border border-slate-200 overflow-hidden">
-          <div 
-            onClick={() => setIsTableExpanded(!isTableExpanded)}
-            className="px-6 py-4 flex justify-between items-center cursor-pointer hover:bg-slate-50/50 transition-colors"
-          >
+          <div onClick={() => setIsTableExpanded(!isTableExpanded)} className="px-6 py-4 flex justify-between items-center cursor-pointer hover:bg-slate-50/50 transition-colors">
             <h3 className="text-sm font-semibold text-slate-700">Daftar Produk</h3>
             <div className="flex items-center gap-3">
               <span className="text-xs font-medium text-slate-400 bg-slate-100 px-2 py-0.5 rounded-full">{filteredProducts.length} Items</span>
@@ -280,10 +359,12 @@ export default function InventoryPage() {
                 </thead>
                 <tbody className="divide-y divide-slate-100">
                   {loading ? (
-                    <tr><td colSpan={7} className="text-center py-12 text-slate-400 text-sm">Memproses data...</td></tr>
+                    <tr><td colSpan={7} className="text-center py-12 text-slate-400 text-sm">
+                        <Loader2 className="animate-spin mx-auto mb-2 text-indigo-500" /> Memproses data...
+                    </td></tr>
                   ) : filteredProducts.map((p) => (
                     <tr key={p.id} className="group hover:bg-slate-50/80 transition-colors">
-                      <td className="px-6 py-4 text-xs font-medium text-indigo-600">{p.sku}</td>
+                      <td className="px-6 py-4 text-xs font-bold text-indigo-600 font-mono tracking-tighter">{p.sku}</td>
                       <td className="px-6 py-4 text-sm font-medium text-slate-800">{p.name}</td>
                       <td className="px-6 py-4 text-[11px] font-medium text-slate-500">{p.itemGroup?.name || '-'}</td>
                       <td className="px-6 py-4 text-center">
@@ -292,21 +373,14 @@ export default function InventoryPage() {
                             p.majorGroup === 'KITCHEN' ? 'bg-blue-50 text-blue-600' : 'bg-slate-100 text-slate-600'
                           }`}>{p.majorGroup}</span>
                       </td>
-                      <td className="px-6 py-4 text-right text-sm font-medium text-slate-600">
-                        {formatCurrency(p.buyPrice || 0)} 
-                      </td>
+                      <td className="px-6 py-4 text-right text-sm font-medium text-slate-600">{formatCurrency(p.buyPrice || 0)}</td>
                       <td className="px-6 py-4 text-right">
                         <span className="text-sm font-semibold text-slate-900">{p.qty}</span>
                         <span className="ml-1 text-[10px] font-medium text-slate-400 uppercase">{p.uom}</span>
                       </td>
                       <td className="px-6 py-4">
                         <div className="flex justify-center gap-1 opacity-0 group-hover:opacity-100 transition-opacity">
-                          <button onClick={() => { 
-                            setIsEdit(true); 
-                            setSelectedId(p.id); 
-                            setFormData({ name: p.name, itemGroupId: p.itemGroupId, uom: p.uom, buyPrice: p.buyPrice === 0 ? '' : String(p.buyPrice) }); 
-                            setShowModal(true); 
-                          }} className="p-1.5 text-slate-400 hover:text-indigo-600 hover:bg-indigo-50 rounded-lg transition-all"><Edit2 size={15}/></button>
+                          <button onClick={() => { setIsEdit(true); setSelectedId(p.id); setFormData({ name: p.name, itemGroupId: p.itemGroupId, uom: p.uom, buyPrice: p.buyPrice === 0 ? '' : String(p.buyPrice) }); setShowModal(true); }} className="p-1.5 text-slate-400 hover:text-indigo-600 hover:bg-indigo-50 rounded-lg transition-all"><Edit2 size={15}/></button>
                           <button onClick={async () => { if(confirm('Hapus item?')) { await fetch(`http://localhost:3000/product/${p.id}`, {method:'DELETE'}); fetchData(); } }} className="p-1.5 text-slate-400 hover:text-red-600 hover:bg-red-50 rounded-lg transition-all"><Trash2 size={15}/></button>
                         </div>
                       </td>
@@ -338,8 +412,8 @@ export default function InventoryPage() {
               });
               if(res.ok) { e.target.reset(); fetchData(); }
             }} className="space-y-4">
-              <input name="gName" required placeholder="Nama group..." className="w-full bg-white border border-slate-200 rounded-xl px-4 py-2.5 text-sm focus:ring-2 focus:ring-indigo-500/20 outline-none transition-all" />
-              <select name="gMajor" className="w-full bg-white border border-slate-200 rounded-xl px-4 py-2.5 text-sm font-medium focus:ring-2 focus:ring-indigo-500/20 outline-none">
+              <input name="gName" required placeholder="Nama group..." className="w-full bg-white border border-slate-200 rounded-xl px-4 py-2.5 text-sm outline-none transition-all focus:ring-2 focus:ring-indigo-500/20" />
+              <select name="gMajor" className="w-full bg-white border border-slate-200 rounded-xl px-4 py-2.5 text-sm font-medium focus:ring-2 focus:ring-indigo-500/20 outline-none cursor-pointer">
                 <option value="BAR">BAR</option>
                 <option value="KITCHEN">KITCHEN</option>
                 <option value="OTHER">OTHER</option>
@@ -359,7 +433,7 @@ export default function InventoryPage() {
                   </div>
                 ) : (
                   <>
-                    <div className="flex flex-col">
+                    <div className="flex flex-col text-left">
                       <span className="text-[10px] font-semibold text-slate-400 uppercase tracking-tighter">{g.majorGroup}</span>
                       <span className="text-sm font-medium text-slate-700">{g.name}</span>
                     </div>
@@ -375,34 +449,26 @@ export default function InventoryPage() {
         </div>
       </section>
 
-      {/* MODERN MODAL */}
+      {/* MODAL TAMBAH/EDIT */}
       {showModal && (
         <div className="fixed inset-0 bg-slate-900/40 backdrop-blur-[2px] flex items-center justify-center z-[200] p-4">
           <div className="bg-white rounded-3xl w-full max-w-md shadow-2xl overflow-hidden animate-in zoom-in-95 duration-200">
             <div className="px-8 pt-8 pb-4">
               <h2 className="text-xl font-semibold text-slate-900">{isEdit ? 'Ubah Item' : 'Item Baru'}</h2>
-              <p className="text-slate-500 text-xs mt-1">Lengkapi informasi produk di bawah ini.</p>
+              <p className="text-slate-500 text-xs mt-1">Gunakan kode otomatis C00xxxx atau edit detail.</p>
             </div>
             <form onSubmit={handleSaveProduct} className="p-8 space-y-5">
               <div className="space-y-1.5">
                 <label className="text-xs font-semibold text-slate-500 uppercase ml-1 tracking-wide">Nama Produk</label>
                 <input required className="w-full bg-slate-50 border border-slate-200 rounded-xl px-4 py-3 text-sm font-medium outline-none focus:ring-2 focus:ring-indigo-500/20 focus:bg-white transition-all" value={formData.name} onChange={e => setFormData({...formData, name: e.target.value})} />
               </div>
-              
               <div className="space-y-1.5">
                 <label className="text-xs font-semibold text-slate-500 uppercase ml-1 tracking-wide">Harga Satuan</label>
                 <div className="relative">
                   <span className="absolute left-4 top-1/2 -translate-y-1/2 text-sm font-medium text-slate-400 font-mono tracking-tighter">Rp</span>
-                  <input 
-                    type="text" 
-                    className="w-full bg-slate-50 border border-slate-200 rounded-xl pl-10 pr-4 py-3 text-sm font-mono font-medium outline-none focus:ring-2 focus:ring-indigo-500/20 focus:bg-white transition-all" 
-                    value={formatNumberWithDot(formData.buyPrice)} 
-                    onChange={handlePriceChange}
-                    placeholder="0"
-                  />
+                  <input type="text" className="w-full bg-slate-50 border border-slate-200 rounded-xl pl-10 pr-4 py-3 text-sm font-mono font-medium outline-none focus:ring-2 focus:ring-indigo-500/20 focus:bg-white transition-all" value={formatNumberWithDot(formData.buyPrice)} onChange={handlePriceChange} placeholder="0" />
                 </div>
               </div>
-
               <div className="grid grid-cols-2 gap-4">
                 <div className="space-y-1.5">
                   <label className="text-xs font-semibold text-slate-500 uppercase ml-1 tracking-wide">Kategori</label>
@@ -418,7 +484,6 @@ export default function InventoryPage() {
                   </select>
                 </div>
               </div>
-
               <div className="flex gap-3 pt-6">
                 <button type="button" onClick={() => setShowModal(false)} className="flex-1 py-3 text-sm font-semibold text-slate-500 hover:bg-slate-50 rounded-xl transition-colors">Batal</button>
                 <button type="submit" disabled={isSubmitting} className="flex-1 bg-indigo-600 hover:bg-indigo-700 text-white py-3 rounded-xl text-sm font-semibold shadow-indigo-100 shadow-lg transition-all disabled:opacity-50">

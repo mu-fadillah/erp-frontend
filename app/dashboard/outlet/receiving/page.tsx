@@ -7,9 +7,13 @@ import {
   RefreshCcw, 
   AlertCircle, 
   ChevronRight,
-  Truck,
+  ChevronDown,
+  ChevronUp,
   Loader2,
-  ListChecks
+  ListChecks,
+  XCircle,
+  Building2,
+  ClipboardCheck
 } from 'lucide-react';
 
 interface PurchasingItem {
@@ -37,16 +41,21 @@ export default function ReceivingPage() {
   const [activePOs, setActivePOs] = useState<POData[]>([]);
   const [loading, setLoading] = useState(true);
   const [receiveData, setReceiveData] = useState<{ [key: string]: ReceiveInput }>({});
+  const [expandedPOs, setExpandedPOs] = useState<{ [key: string]: boolean }>({});
   
   const API_URL = 'http://localhost:3000';
 
   const fetchActivePOs = useCallback(async () => {
     try {
       setLoading(true);
+      // Backend sudah dipastikan hanya mengirim status SENT/Official [cite: 2026-01-28]
       const res = await fetch(`${API_URL}/purchasing/po/list?status=SENT`);
       if (!res.ok) throw new Error("Gagal mengambil data");
       const data = await res.json();
-      setActivePOs(data);
+      
+      // Filter tambahan di frontend untuk memastikan tidak ada Draft yang lolos
+      const onlySent = data.filter((po: any) => po.status === 'SENT');
+      setActivePOs(onlySent);
     } catch (err) {
       console.error("Error fetching POs:", err);
     } finally {
@@ -58,6 +67,10 @@ export default function ReceivingPage() {
     fetchActivePOs();
   }, [fetchActivePOs]);
 
+  const togglePO = (poId: string) => {
+    setExpandedPOs(prev => ({ ...prev, [poId]: !prev[poId] }));
+  };
+
   const handleMatchAll = (po: POData) => {
     const updates = { ...receiveData };
     po.items.forEach(item => {
@@ -65,6 +78,14 @@ export default function ReceivingPage() {
       if (remaining > 0) {
         updates[item.id] = { amount: remaining, notes: '' };
       }
+    });
+    setReceiveData(updates);
+  };
+
+  const handleClearAll = (po: POData) => {
+    const updates = { ...receiveData };
+    po.items.forEach(item => {
+      delete updates[item.id];
     });
     setReceiveData(updates);
   };
@@ -115,127 +136,148 @@ export default function ReceivingPage() {
 
   if (loading) return (
     <div className="flex flex-col items-center justify-center min-h-screen bg-slate-50">
-      <Loader2 className="animate-spin text-orange-500 mb-4" size={40} />
+      <Loader2 className="animate-spin text-orange-600 mb-4" size={40} />
       <p className="text-[10px] font-black uppercase tracking-[0.2em] text-slate-400">Menghubungkan ke Gudang...</p>
     </div>
   );
 
   return (
-    <div className="p-4 md:p-8 max-w-2xl mx-auto bg-slate-50 min-h-screen pb-32">
-      {/* HEADER */}
+    <div className="p-4 md:p-8 max-w-4xl mx-auto bg-slate-50 min-h-screen pb-32">
       <div className="flex justify-between items-center mb-10">
         <div>
           <h1 className="text-3xl font-black text-slate-900 tracking-tight">Receiving</h1>
-          <div className="flex items-center gap-2 mt-1">
-            <span className="w-2 h-2 bg-orange-500 rounded-full animate-pulse" />
-            <p className="text-[10px] font-bold text-slate-500 uppercase tracking-widest">Barang Datang Hari Ini</p>
-          </div>
+          <p className="text-[11px] font-bold text-slate-500 uppercase tracking-widest mt-1">Konfirmasi Stok Masuk dari Vendor</p>
         </div>
-        <button 
-          onClick={fetchActivePOs} 
-          className="w-12 h-12 bg-white rounded-2xl flex items-center justify-center shadow-sm border border-slate-200 text-slate-400 hover:text-orange-500 hover:border-orange-200 transition-all active:scale-90"
-        >
-          <RefreshCcw size={20} />
+        <button onClick={fetchActivePOs} className="w-12 h-12 bg-white rounded-2xl flex items-center justify-center shadow-sm border border-slate-200 text-slate-400 hover:text-orange-600 transition-all">
+          <RefreshCcw size={20} className={loading ? 'animate-spin' : ''} />
         </button>
       </div>
 
-      <div className="space-y-8">
+      <div className="space-y-4">
         {activePOs.length === 0 ? (
           <div className="bg-white p-20 rounded-[40px] text-center border-2 border-dashed border-slate-200">
-            <div className="w-16 h-16 bg-slate-50 rounded-full flex items-center justify-center mx-auto mb-4">
-              <Package size={28} className="text-slate-300" />
-            </div>
-            <p className="text-slate-400 font-bold text-sm">Semua kiriman sudah diterima.</p>
+            <Package size={40} className="text-slate-200 mx-auto mb-4" />
+            <p className="text-slate-400 font-bold text-sm uppercase">Belum ada PO yang dikirim oleh Purchasing.</p>
           </div>
         ) : (
-          activePOs.map((po) => (
-            <div key={po.id} className="bg-white rounded-[35px] shadow-xl shadow-slate-200/50 border border-slate-100 overflow-hidden">
-              {/* CARD HEADER */}
-              <div className="px-6 py-5 bg-slate-900 text-white">
-                <div className="flex justify-between items-start mb-2">
-                   <div className="bg-orange-600 px-3 py-1 rounded-lg text-[10px] font-black uppercase tracking-wider">
-                     {po.orderNumber}
-                   </div>
-                   <button 
-                    onClick={() => handleMatchAll(po)}
-                    className="flex items-center gap-1.5 text-[10px] font-black text-orange-400 hover:text-orange-300 transition-colors uppercase"
-                   >
-                     <ListChecks size={14} /> Match All
-                   </button>
-                </div>
-                <h2 className="text-lg font-bold truncate leading-tight">{po.supplier?.name}</h2>
-              </div>
-
-              {/* ITEM LIST */}
-              <div className="divide-y divide-slate-50">
-                {po.items.map((item) => {
-                  const remaining = item.quantity - item.receivedQuantity;
-                  const currentInput = receiveData[item.id]?.amount || 0;
-                  const isMismatch = currentInput > 0 && currentInput !== remaining;
-                  const isFullyReceived = remaining <= 0;
-
-                  if (isFullyReceived) return null;
-
-                  return (
-                    <div key={item.id} className="p-6 transition-all hover:bg-slate-50/50">
-                      <div className="flex items-start justify-between gap-4">
-                        <div className="flex-1">
-                          <h3 className="font-black text-slate-800 text-sm uppercase leading-tight mb-1">{item.product?.name}</h3>
-                          <div className="flex items-center gap-3">
-                            <span className="text-[10px] font-bold text-slate-400 uppercase">Order: <span className="text-slate-700">{item.quantity} {item.uom || 'U'}</span></span>
-                            <span className="w-1 h-1 bg-slate-200 rounded-full" />
-                            <span className="text-[10px] font-bold text-slate-400 uppercase">Left: <span className="text-orange-600">{remaining}</span></span>
-                          </div>
-                        </div>
-
-                        <div className="relative">
-                          <input 
-                            type="number"
-                            value={receiveData[item.id]?.amount || ''}
-                            onChange={(e) => handleInputChange(item.id, 'amount', e.target.value)}
-                            className={`w-20 py-3 rounded-2xl border-2 text-center font-black text-lg transition-all outline-none ${
-                              currentInput > 0 
-                              ? 'border-orange-500 bg-orange-50 text-orange-600 shadow-lg shadow-orange-500/10' 
-                              : 'border-slate-100 bg-slate-50 focus:border-orange-300 focus:bg-white'
-                            }`}
-                            placeholder="0"
-                          />
-                        </div>
-                      </div>
-
-                      {/* MISMATCH WARNING & NOTE */}
-                      {isMismatch && (
-                        <div className="mt-4 animate-in slide-in-from-top-2">
-                          <div className="flex items-center gap-2 text-rose-500 mb-2">
-                            <AlertCircle size={14} />
-                            <span className="text-[10px] font-black uppercase">Selisih detected! Berikan alasan:</span>
-                          </div>
-                          <input 
-                            type="text"
-                            value={receiveData[item.id]?.notes || ''}
-                            onChange={(e) => handleInputChange(item.id, 'notes', e.target.value)}
-                            placeholder="Contoh: Barang pecah / Supplier salah kirim..."
-                            className="w-full px-4 py-3 rounded-xl bg-rose-50 border border-rose-100 text-xs font-bold text-rose-700 placeholder:text-rose-300 outline-none focus:ring-2 focus:ring-rose-200 transition-all"
-                          />
-                        </div>
-                      )}
-                    </div>
-                  );
-                })}
-              </div>
-
-              {/* CONFIRM BUTTON */}
-              <div className="p-6 bg-slate-50/50 border-t border-slate-100">
-                <button 
-                  onClick={() => submitReceiving(po.id)}
-                  className="w-full py-4 bg-slate-900 hover:bg-orange-600 text-white rounded-2xl font-black text-xs uppercase tracking-widest shadow-xl shadow-slate-200 transition-all active:scale-95 flex items-center justify-center gap-3 group"
+          activePOs.map((po) => {
+            const isExpanded = expandedPOs[po.id] || false;
+            return (
+              <div key={po.id} className="bg-white rounded-3xl shadow-sm border border-slate-200 overflow-hidden">
+                {/* Header Section */}
+                <div 
+                  onClick={() => togglePO(po.id)}
+                  className="p-5 flex flex-col md:flex-row md:items-center justify-between cursor-pointer hover:bg-slate-50 transition-colors gap-4"
                 >
-                  Confirm Delivery
-                  <ChevronRight size={16} className="group-hover:translate-x-1 transition-transform" />
-                </button>
+                  <div className="flex items-center gap-4">
+                    <div className={`w-12 h-12 rounded-2xl flex items-center justify-center transition-all ${isExpanded ? 'bg-orange-600 text-white shadow-lg shadow-orange-200' : 'bg-slate-100 text-slate-400'}`}>
+                      <Building2 size={24} />
+                    </div>
+                    <div>
+                      <div className="flex items-center gap-2">
+                        <span className="text-[9px] font-black bg-slate-900 text-white px-2 py-0.5 rounded uppercase tracking-tighter">{po.orderNumber}</span>
+                        <h2 className="text-sm font-black text-slate-800 uppercase truncate">{po.supplier?.name}</h2>
+                      </div>
+                      <p className="text-[10px] text-slate-400 font-bold mt-0.5 uppercase tracking-tight">{po.items.length} Items dalam pengiriman</p>
+                    </div>
+                  </div>
+                  
+                  <div className="flex items-center gap-3">
+                    {isExpanded && (
+                      <div className="flex items-center gap-2 mr-4">
+                        <button onClick={(e) => { e.stopPropagation(); handleMatchAll(po); }} className="flex items-center gap-1 text-[10px] font-black text-emerald-600 hover:bg-emerald-50 px-3 py-1.5 rounded-lg transition-colors border border-emerald-100">
+                          <ListChecks size={14} /> MATCH ALL
+                        </button>
+                        <button onClick={(e) => { e.stopPropagation(); handleClearAll(po); }} className="flex items-center gap-1 text-[10px] font-black text-slate-400 hover:bg-slate-100 px-3 py-1.5 rounded-lg transition-colors border border-slate-100">
+                          <XCircle size={14} /> CLEAR
+                        </button>
+                      </div>
+                    )}
+                    {isExpanded ? <ChevronUp className="text-slate-300" /> : <ChevronDown className="text-slate-300" />}
+                  </div>
+                </div>
+
+                {/* Table Content */}
+                {isExpanded && (
+                  <div className="border-t border-slate-100 animate-in slide-in-from-top-2">
+                    <div className="overflow-x-auto">
+                      <table className="w-full text-left border-collapse">
+                        <thead>
+                          <tr className="bg-slate-50/50">
+                            <th className="px-6 py-4 text-[10px] font-bold text-slate-400 uppercase tracking-widest">Item Name</th>
+                            <th className="px-6 py-4 text-[10px] font-bold text-slate-400 uppercase tracking-widest text-center">Remaining</th>
+                            <th className="px-6 py-4 text-[10px] font-bold text-slate-400 uppercase tracking-widest text-center">Receive Amount</th>
+                            <th className="px-6 py-4 text-[10px] font-bold text-slate-400 uppercase tracking-widest">Note/Reason</th>
+                          </tr>
+                        </thead>
+                        <tbody className="divide-y divide-slate-50">
+                          {po.items.map((item) => {
+                            const remaining = item.quantity - item.receivedQuantity;
+                            const currentInput = receiveData[item.id]?.amount || 0;
+                            const isMismatch = currentInput > 0 && currentInput !== remaining;
+                            
+                            if (remaining <= 0) return null;
+
+                            return (
+                              <tr key={item.id} className="group hover:bg-slate-50/30 transition-colors">
+                                <td className="px-6 py-4">
+                                  <p className="text-sm font-bold text-slate-700 uppercase">{item.product?.name}</p>
+                                  <p className="text-[10px] text-slate-400 font-medium">Order: {item.quantity} {item.uom || 'PCS'}</p>
+                                </td>
+                                <td className="px-6 py-4 text-center">
+                                  <span className="text-sm font-black text-orange-600">{remaining}</span>
+                                </td>
+                                <td className="px-6 py-4">
+                                  <div className="flex justify-center">
+                                    <input 
+                                      type="number"
+                                      value={receiveData[item.id]?.amount || ''}
+                                      onChange={(e) => handleInputChange(item.id, 'amount', e.target.value)}
+                                      className={`w-20 py-2 rounded-xl border-2 text-center font-black text-md transition-all outline-none ${
+                                        currentInput > 0 
+                                        ? 'border-orange-500 bg-orange-50 text-orange-600' 
+                                        : 'border-slate-100 bg-slate-50'
+                                      }`}
+                                      placeholder="0"
+                                    />
+                                  </div>
+                                </td>
+                                <td className="px-6 py-4">
+                                  {isMismatch ? (
+                                    <input 
+                                      type="text"
+                                      value={receiveData[item.id]?.notes || ''}
+                                      onChange={(e) => handleInputChange(item.id, 'notes', e.target.value)}
+                                      placeholder="Alasan selisih..."
+                                      className="w-full px-3 py-2 rounded-lg bg-rose-50 border border-rose-100 text-[11px] font-bold text-rose-700 outline-none"
+                                    />
+                                  ) : (
+                                    <span className="text-[10px] text-slate-300 italic">No notes needed</span>
+                                  )}
+                                </td>
+                              </tr>
+                            );
+                          })}
+                        </tbody>
+                      </table>
+                    </div>
+                    
+                    {/* Action Footer for PO */}
+                    <div className="p-6 bg-slate-50/50 flex justify-end">
+                      <button 
+                        onClick={() => submitReceiving(po.id)}
+                        className="flex items-center gap-3 bg-slate-900 hover:bg-orange-600 text-white px-8 py-3 rounded-2xl font-black text-[11px] uppercase tracking-widest transition-all active:scale-95 group shadow-lg shadow-slate-200"
+                      >
+                        <ClipboardCheck size={16} />
+                        Confirm Receiving
+                        <ChevronRight size={16} className="group-hover:translate-x-1 transition-transform" />
+                      </button>
+                    </div>
+                  </div>
+                )}
               </div>
-            </div>
-          ))
+            );
+          })
         )}
       </div>
     </div>

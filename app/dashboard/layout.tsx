@@ -22,9 +22,7 @@ export default function DashboardLayout({ children }: { children: React.ReactNod
   const pathname = usePathname();
   const [prCount, setPrCount] = useState(0);
 
-  // --- 2. DATA NAVIGASI ---
-  // Didefinisikan di dalam komponen agar prCount bisa terupdate, 
-  // namun tetap stabil untuk referensi inisialisasi state.
+  // --- 2. DATA NAVIGASI (UPDATED WITH OUTLET) ---
   const navigation: NavGroup[] = [
     {
       group: 'ADMIN OUTLET',
@@ -58,22 +56,19 @@ export default function DashboardLayout({ children }: { children: React.ReactNod
     {
       group: 'SETUP & MASTER',
       items: [
-        { name: 'Inventory Data', path: '/dashboard/setup/inventory', icon: '📦' },
-        { name: 'Supplier Data', path: '/dashboard/setup/supplier', icon: '🏢' },
-        { name: 'Menu Data', path: '/dashboard/setup/menu', icon: '🍽️', empty: true },
-        { name: 'Outlet List', path: '/dashboard/setup/outlet', icon: '🏪', empty: true },
+        { name: 'Master Inventory', path: '/dashboard/setup/inventory', icon: '📦' },
+        { name: 'Outlet List', path: '/dashboard/setup/outlet', icon: '🏪' }, 
+        { name: 'Master Supplier', path: '/dashboard/setup/supplier', icon: '🏢' },
+        { name: 'Master Menu', path: '/dashboard/setup/menu', icon: '🍽️', empty: true },
         { name: 'User Management', path: '/dashboard/setup/users', icon: '👥', empty: true },
       ]
     }
   ];
 
-  // --- 3. STATE MANAGEMENT (FIXED) ---
-  // Inisialisasi state langsung dengan fungsi (Lazy Initial State)
-  // Ini mencegah error "cascading renders" karena logic dijalankan saat konstruksi awal.
+  // --- 3. STATE MANAGEMENT ---
   const [openGroups, setOpenGroups] = useState<{ [key: string]: boolean }>(() => {
     const initialOpen: { [key: string]: boolean } = {};
     navigation.forEach(nav => {
-      // Jika ada item dalam group yang jalurnya (path) cocok dengan URL saat ini
       if (nav.items.some(item => pathname === item.path)) {
         initialOpen[nav.group] = true;
       }
