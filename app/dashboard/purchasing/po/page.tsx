@@ -23,7 +23,6 @@ export default function PurchasingPODashboardPage() {
   const [allSuppliers, setAllSuppliers] = useState<any[]>([]);
   const [targetItem, setTargetItem] = useState<any>(null); 
   const [itemPrices, setItemPrices] = useState<{ [key: string]: number }>({});
-  
   const [expandedVendors, setExpandedVendors] = useState<{ [key: string]: boolean }>({});
 
   const API_URL = 'http://localhost:3000';
@@ -56,11 +55,35 @@ export default function PurchasingPODashboardPage() {
 
   const fetchSuppliers = async () => {
     try {
-      const res = await fetch(`${API_URL}/supplier`); 
+      const res = await fetch(`${API_URL}/purchasing/suppliers`); 
       const data = await res.json();
       setAllSuppliers(data);
     } catch (err) { 
       console.error(err); 
+    }
+  };
+
+  // --- HELPER: MODERN STATUS BADGE ---
+  const getStatusBadge = (status: string) => {
+    switch (status) {
+      case 'PENDING':
+        return (
+          <span className="flex items-center gap-1 text-[9px] font-bold text-amber-600 bg-amber-50 border border-amber-100 px-1.5 py-0.5 rounded-md uppercase tracking-tighter">
+            <Clock size={10} /> Draft
+          </span>
+        );
+      case 'SENT':
+        return (
+          <span className="flex items-center gap-1 text-[9px] font-bold text-emerald-600 bg-emerald-50 border border-emerald-100 px-1.5 py-0.5 rounded-md uppercase tracking-tighter">
+            <CheckCircle2 size={10} /> Official
+          </span>
+        );
+      default:
+        return (
+          <span className="text-[9px] font-bold text-slate-500 bg-slate-50 border border-slate-100 px-1.5 py-0.5 rounded-md uppercase tracking-tighter">
+            {status}
+          </span>
+        );
     }
   };
 
@@ -76,10 +99,7 @@ export default function PurchasingPODashboardPage() {
   };
 
   const toggleVendor = (vendorName: string) => {
-    setExpandedVendors(prev => ({
-      ...prev,
-      [vendorName]: !prev[vendorName]
-    }));
+    setExpandedVendors(prev => ({ ...prev, [vendorName]: !prev[vendorName] }));
   };
 
   const groupedPOs = useMemo(() => {
@@ -102,7 +122,6 @@ export default function PurchasingPODashboardPage() {
         const currentPrice = itemPrices[it.id] || it.price || 0;
         groups[sName].totalValue += (it.quantity * currentPrice);
         
-        // Perbaikan pengambilan nama outlet berdasarkan schema model
         const outletName = it.prItem?.purchaseRequest?.outlet?.name || po.outlet?.name || 'Central';
 
         return { 
@@ -156,7 +175,7 @@ export default function PurchasingPODashboardPage() {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
-          purchasingItemId: targetItem.id,
+          itemIds: [targetItem.id],
           newSupplierName: supplierName
         })
       });
@@ -165,12 +184,15 @@ export default function PurchasingPODashboardPage() {
         setIsModalOpen(false);
         setTargetItem(null);
         await fetchPOList();
+      } else {
+        const errorData = await res.json();
+        alert(`Gagal: ${errorData.message}`);
       }
     } catch (err) {
       alert("Gagal memindahkan item.");
     }
   };
-
+  
   return (
     <div className="p-8 pb-40 max-w-[1600px] mx-auto bg-slate-50 min-h-screen">
       <div className="flex justify-between items-center mb-10">
@@ -257,31 +279,30 @@ export default function PurchasingPODashboardPage() {
                               </span>
                             </td>
                             <td className="px-6 py-3">
-                            <div className="flex flex-col">
-                              <span className="text-slate-700 font-bold text-[11px]">
-                                {new Date(item.originalRequestDate).toLocaleDateString('id-ID', { 
-                                  weekday: 'short', 
-                                  day: '2-digit', 
-                                  month: 'short'
-                                })}
-                              </span>
-                              <div className="flex items-center gap-1 mt-0.5">
+                              <div className="flex flex-col">
+                                <span className="text-slate-700 font-bold text-[11px]">
+                                  {new Date(item.originalRequestDate).toLocaleDateString('id-ID', { 
+                                    weekday: 'short', 
+                                    day: '2-digit', 
+                                    month: 'short'
+                                  })}
+                                </span>
                                 <span className="text-[10px] text-slate-400 font-medium">
                                   {new Date(item.originalRequestDate).toLocaleTimeString('id-ID', { 
                                     hour: '2-digit', 
                                     minute: '2-digit' 
                                   })}
                                 </span>
-                                {Math.abs(new Date().getTime() - new Date(item.originalRequestDate).getTime()) > 172800000 && (
-                                  <div className="w-1.5 h-1.5 rounded-full bg-rose-500 animate-pulse" title="Sangat lama di proses" />
-                                )}
                               </div>
-                            </div>
-                          </td>
+                            </td>
                             <td className="px-6 py-3">
-                              <p className="text-sm font-bold text-slate-700 uppercase tracking-tight">{item.product?.name}</p>
+                              {/* STATUS DISEMATKAN DI SINI DI SAMPING NAMA ITEM */}
+                              <div className="flex items-center gap-2 mb-0.5">
+                                <p className="text-sm font-bold text-slate-700 uppercase tracking-tight">{item.product?.name}</p>
+                                {getStatusBadge(item.poStatus)}
+                              </div>
                               {item.outletNote && (
-                                <p className="text-[10px] italic text-slate-400 mt-0.5 flex items-center gap-1">
+                                <p className="text-[10px] italic text-slate-400 flex items-center gap-1">
                                   <AlertCircle size={10}/> {item.outletNote}
                                 </p>
                               )}

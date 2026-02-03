@@ -2,10 +2,8 @@
 'use client';
 import { useState, useEffect, useCallback } from 'react';
 import { 
-  CheckCircle2, 
   Package, 
   RefreshCcw, 
-  AlertCircle, 
   ChevronRight,
   ChevronDown,
   ChevronUp,
@@ -13,7 +11,9 @@ import {
   ListChecks,
   XCircle,
   Building2,
-  ClipboardCheck
+  ClipboardCheck,
+  MapPin,
+  CheckCircle2
 } from 'lucide-react';
 
 interface PurchasingItem {
@@ -22,6 +22,8 @@ interface PurchasingItem {
   quantity: number;
   receivedQuantity: number;
   uom?: string;
+  // Tambahan meta untuk identifikasi outlet per item jika diperlukan
+  outletName?: string; 
 }
 
 interface POData {
@@ -29,6 +31,7 @@ interface POData {
   orderNumber: string;
   status: string;
   supplier: { name: string };
+  outlet?: { name: string }; // Penambahan relasi outlet
   items: PurchasingItem[];
 }
 
@@ -48,12 +51,11 @@ export default function ReceivingPage() {
   const fetchActivePOs = useCallback(async () => {
     try {
       setLoading(true);
-      // Backend sudah dipastikan hanya mengirim status SENT/Official [cite: 2026-01-28]
+      // Mengambil PO dengan status SENT
       const res = await fetch(`${API_URL}/purchasing/po/list?status=SENT`);
       if (!res.ok) throw new Error("Gagal mengambil data");
       const data = await res.json();
       
-      // Filter tambahan di frontend untuk memastikan tidak ada Draft yang lolos
       const onlySent = data.filter((po: any) => po.status === 'SENT');
       setActivePOs(onlySent);
     } catch (err) {
@@ -117,6 +119,8 @@ export default function ReceivingPage() {
       return;
     }
 
+    if (!confirm("Konfirmasi penerimaan barang? Stok akan langsung bertambah.")) return;
+
     try {
       const res = await fetch(`${API_URL}/purchasing/po/receive`, {
         method: 'PATCH',
@@ -128,7 +132,7 @@ export default function ReceivingPage() {
 
       alert("Penerimaan barang berhasil dicatat!");
       setReceiveData({});
-      fetchActivePOs();
+      fetchActivePOs(); // Refresh untuk menghilangkan item/PO yang sudah RECEIVED
     } catch (err) {
       alert("Terjadi kesalahan saat memproses penerimaan.");
     }
@@ -142,29 +146,28 @@ export default function ReceivingPage() {
   );
 
   return (
-    <div className="p-4 md:p-8 max-w-4xl mx-auto bg-slate-50 min-h-screen pb-32">
+    <div className="p-4 md:p-8 max-w-6xl mx-auto bg-slate-50 min-h-screen pb-32">
+      {/* Header Section */}
       <div className="flex justify-between items-center mb-10">
         <div>
-          <h1 className="text-3xl font-black text-slate-900 tracking-tight">Receiving</h1>
-          <p className="text-[11px] font-bold text-slate-500 uppercase tracking-widest mt-1">Konfirmasi Stok Masuk dari Vendor</p>
+          <h1 className="text-3xl font-black text-slate-900 tracking-tight text-[10px] uppercase tracking-[0.2em]">Receiving</h1>
+          <p className="text-[11px] font-bold text-slate-500 uppercase tracking-widest mt-1">Konfirmasi Stok Masuk per Item & Outlet</p>
         </div>
-        <button onClick={fetchActivePOs} className="w-12 h-12 bg-white rounded-2xl flex items-center justify-center shadow-sm border border-slate-200 text-slate-400 hover:text-orange-600 transition-all">
-          <RefreshCcw size={20} className={loading ? 'animate-spin' : ''} />
-        </button>
+        {/* ... Button Refresh */}
       </div>
 
-      <div className="space-y-4">
+      <div className="space-y-6">
         {activePOs.length === 0 ? (
           <div className="bg-white p-20 rounded-[40px] text-center border-2 border-dashed border-slate-200">
-            <Package size={40} className="text-slate-200 mx-auto mb-4" />
-            <p className="text-slate-400 font-bold text-sm uppercase">Belum ada PO yang dikirim oleh Purchasing.</p>
+             <Package size={40} className="text-slate-200 mx-auto mb-4" />
+             <p className="text-slate-400 font-bold text-sm uppercase">Belum ada PO untuk diterima.</p>
           </div>
         ) : (
           activePOs.map((po) => {
             const isExpanded = expandedPOs[po.id] || false;
             return (
               <div key={po.id} className="bg-white rounded-3xl shadow-sm border border-slate-200 overflow-hidden">
-                {/* Header Section */}
+                {/* Header Vendor Tetap Bersih */}
                 <div 
                   onClick={() => togglePO(po.id)}
                   className="p-5 flex flex-col md:flex-row md:items-center justify-between cursor-pointer hover:bg-slate-50 transition-colors gap-4"
@@ -176,19 +179,19 @@ export default function ReceivingPage() {
                     <div>
                       <div className="flex items-center gap-2">
                         <span className="text-[9px] font-black bg-slate-900 text-white px-2 py-0.5 rounded uppercase tracking-tighter">{po.orderNumber}</span>
-                        <h2 className="text-sm font-black text-slate-800 uppercase truncate">{po.supplier?.name}</h2>
+                        <h2 className="text-sm font-black text-slate-800 uppercase tracking-tight text-[10px] uppercase tracking-[0.2em]">{po.supplier?.name}</h2>
                       </div>
-                      <p className="text-[10px] text-slate-400 font-bold mt-0.5 uppercase tracking-tight">{po.items.length} Items dalam pengiriman</p>
+                      <p className="text-[10px] text-slate-400 font-bold mt-0.5 uppercase tracking-tight">{po.items.length} Items dalam pengiriman ini</p>
                     </div>
                   </div>
                   
                   <div className="flex items-center gap-3">
                     {isExpanded && (
                       <div className="flex items-center gap-2 mr-4">
-                        <button onClick={(e) => { e.stopPropagation(); handleMatchAll(po); }} className="flex items-center gap-1 text-[10px] font-black text-emerald-600 hover:bg-emerald-50 px-3 py-1.5 rounded-lg transition-colors border border-emerald-100">
+                        <button onClick={(e) => { e.stopPropagation(); handleMatchAll(po); }} className="flex items-center gap-1 text-[10px] font-black text-emerald-600 hover:bg-emerald-50 px-3 py-1.5 rounded-lg transition-colors border border-emerald-100 uppercase tracking-tight text-[10px] uppercase tracking-[0.2em]">
                           <ListChecks size={14} /> MATCH ALL
                         </button>
-                        <button onClick={(e) => { e.stopPropagation(); handleClearAll(po); }} className="flex items-center gap-1 text-[10px] font-black text-slate-400 hover:bg-slate-100 px-3 py-1.5 rounded-lg transition-colors border border-slate-100">
+                        <button onClick={(e) => { e.stopPropagation(); handleClearAll(po); }} className="flex items-center gap-1 text-[10px] font-black text-slate-400 hover:bg-slate-100 px-3 py-1.5 rounded-lg transition-colors border border-slate-100 uppercase tracking-tight text-[10px] uppercase tracking-[0.2em]">
                           <XCircle size={14} /> CLEAR
                         </button>
                       </div>
@@ -197,32 +200,39 @@ export default function ReceivingPage() {
                   </div>
                 </div>
 
-                {/* Table Content */}
+                {/* Table Content dengan Kolom Outlet */}
                 {isExpanded && (
                   <div className="border-t border-slate-100 animate-in slide-in-from-top-2">
                     <div className="overflow-x-auto">
                       <table className="w-full text-left border-collapse">
                         <thead>
                           <tr className="bg-slate-50/50">
-                            <th className="px-6 py-4 text-[10px] font-bold text-slate-400 uppercase tracking-widest">Item Name</th>
+                            <th className="px-6 py-4 text-[10px] font-bold text-slate-400 uppercase tracking-widest">Item & Destination</th>
                             <th className="px-6 py-4 text-[10px] font-bold text-slate-400 uppercase tracking-widest text-center">Remaining</th>
-                            <th className="px-6 py-4 text-[10px] font-bold text-slate-400 uppercase tracking-widest text-center">Receive Amount</th>
-                            <th className="px-6 py-4 text-[10px] font-bold text-slate-400 uppercase tracking-widest">Note/Reason</th>
+                            <th className="px-6 py-4 text-[10px] font-bold text-slate-400 uppercase tracking-widest text-center">Receive</th>
+                            <th className="px-6 py-4 text-[10px] font-bold text-slate-400 uppercase tracking-widest">Audit Note</th>
                           </tr>
                         </thead>
                         <tbody className="divide-y divide-slate-50">
-                          {po.items.map((item) => {
+                          {po.items.map((item: any) => {
                             const remaining = item.quantity - item.receivedQuantity;
                             const currentInput = receiveData[item.id]?.amount || 0;
-                            const isMismatch = currentInput > 0 && currentInput !== remaining;
                             
+                            // Mendapatkan nama outlet per item
+                            const itemOutlet = item.prItem?.purchaseRequest?.outlet?.name || po.outlet?.name || 'Central';
+
                             if (remaining <= 0) return null;
 
                             return (
                               <tr key={item.id} className="group hover:bg-slate-50/30 transition-colors">
                                 <td className="px-6 py-4">
-                                  <p className="text-sm font-bold text-slate-700 uppercase">{item.product?.name}</p>
-                                  <p className="text-[10px] text-slate-400 font-medium">Order: {item.quantity} {item.uom || 'PCS'}</p>
+                                  <p className="text-sm font-bold text-slate-700 uppercase tracking-tight text-[10px] uppercase tracking-[0.2em]">{item.product?.name}</p>
+                                  <div className="flex items-center gap-2 mt-1">
+                                    <span className="flex items-center gap-1 text-[9px] font-black text-indigo-600 bg-indigo-50 px-2 py-0.5 rounded border border-indigo-100 uppercase tracking-tight text-[10px] uppercase tracking-[0.2em]">
+                                      <MapPin size={10} /> {itemOutlet}
+                                    </span>
+                                    <span className="text-[10px] text-slate-400 font-bold uppercase">Order: {item.quantity}</span>
+                                  </div>
                                 </td>
                                 <td className="px-6 py-4 text-center">
                                   <span className="text-sm font-black text-orange-600">{remaining}</span>
@@ -233,17 +243,15 @@ export default function ReceivingPage() {
                                       type="number"
                                       value={receiveData[item.id]?.amount || ''}
                                       onChange={(e) => handleInputChange(item.id, 'amount', e.target.value)}
-                                      className={`w-20 py-2 rounded-xl border-2 text-center font-black text-md transition-all outline-none ${
-                                        currentInput > 0 
-                                        ? 'border-orange-500 bg-orange-50 text-orange-600' 
-                                        : 'border-slate-100 bg-slate-50'
+                                      className={`w-20 py-2 rounded-xl border-2 text-center font-black transition-all outline-none ${
+                                        currentInput > 0 ? 'border-orange-500 bg-orange-50 text-orange-600' : 'border-slate-100 bg-slate-50'
                                       }`}
                                       placeholder="0"
                                     />
                                   </div>
                                 </td>
                                 <td className="px-6 py-4">
-                                  {isMismatch ? (
+                                  {currentInput > 0 && currentInput !== remaining ? (
                                     <input 
                                       type="text"
                                       value={receiveData[item.id]?.notes || ''}
@@ -252,7 +260,10 @@ export default function ReceivingPage() {
                                       className="w-full px-3 py-2 rounded-lg bg-rose-50 border border-rose-100 text-[11px] font-bold text-rose-700 outline-none"
                                     />
                                   ) : (
-                                    <span className="text-[10px] text-slate-300 italic">No notes needed</span>
+                                    <span className="text-[10px] text-slate-300 italic flex items-center gap-1">
+                                      {currentInput === remaining && currentInput > 0 && <CheckCircle2 size={12} className="text-emerald-500"/>}
+                                      {currentInput === remaining && currentInput > 0 ? 'Ready to sync' : 'Waiting...'}
+                                    </span>
                                   )}
                                 </td>
                               </tr>
@@ -261,12 +272,11 @@ export default function ReceivingPage() {
                         </tbody>
                       </table>
                     </div>
-                    
                     {/* Action Footer for PO */}
                     <div className="p-6 bg-slate-50/50 flex justify-end">
                       <button 
                         onClick={() => submitReceiving(po.id)}
-                        className="flex items-center gap-3 bg-slate-900 hover:bg-orange-600 text-white px-8 py-3 rounded-2xl font-black text-[11px] uppercase tracking-widest transition-all active:scale-95 group shadow-lg shadow-slate-200"
+                        className="flex items-center gap-3 bg-slate-900 hover:bg-orange-600 text-white px-8 py-3 rounded-2xl font-black text-[11px] uppercase tracking-widest transition-all active:scale-95 group shadow-lg shadow-slate-200 disabled:bg-slate-300"
                       >
                         <ClipboardCheck size={16} />
                         Confirm Receiving
@@ -282,4 +292,5 @@ export default function ReceivingPage() {
       </div>
     </div>
   );
+
 }

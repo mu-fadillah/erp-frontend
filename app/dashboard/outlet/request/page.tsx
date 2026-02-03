@@ -7,7 +7,7 @@ import {
   Search, Plus, History, ClipboardList, Download, 
   Table as TableIcon, FileText, RefreshCw, X, ChevronDown,
   PackageCheck, Clock, ShoppingCart, CheckCircle2,
-  Calendar, Building2
+  Calendar, Building2, MapPin, FileCheck
 } from 'lucide-react';
 
 export default function AdminOutletRequestPage() {
@@ -66,10 +66,14 @@ export default function AdminOutletRequestPage() {
   const fetchHistory = async () => {
     setLoading(true);
     try {
-      const res = await fetch(`${API_URL}/purchasing/pr/history`);
+      // Tambahkan timestamp agar tidak terkena cache browser
+      const res = await fetch(`${API_URL}/purchasing/pr/history?t=${Date.now()}`, {
+        cache: 'no-store'
+      });
       const data = await res.json();
       setHistoryItems(Array.isArray(data) ? data : []);
     } catch (err) {
+      console.error("Error fetching PR history:", err);
       setHistoryItems([]); 
     } finally {
       setLoading(false);
@@ -77,7 +81,8 @@ export default function AdminOutletRequestPage() {
   };
 
   const filteredHistory = useMemo(() => {
-    return historyItems.filter((item: any) => {
+    // 1. Filter data terlebih dahulu
+    const filtered = historyItems.filter((item: any) => {
       const prod = item.product || {};
       const itemName = (prod.name || item.tempProductName || '').toLowerCase();
       const itemDate = new Date(item.createdAt).toISOString().split('T')[0];
@@ -89,6 +94,23 @@ export default function AdminOutletRequestPage() {
       const matchEnd = !filters.endDate || itemDate <= filters.endDate;
 
       return matchSearch && matchStatus && matchGroup && matchStart && matchEnd;
+    });
+
+    // 2. Logic Sortir: Nama Outlet (A-Z) -> Tanggal (Terbaru ke Terlama)
+    return filtered.sort((a, b) => {
+      const outletA = (a.purchaseRequest?.outlet?.name || 'Z-Tanpa Nama').toLowerCase();
+      const outletB = (b.purchaseRequest?.outlet?.name || 'Z-Tanpa Nama').toLowerCase();
+
+      // Jika nama outlet berbeda, urutkan A-Z (Ascending)
+      if (outletA !== outletB) {
+        return outletA.localeCompare(outletB);
+      }
+
+      // Jika outletnya sama, urutkan berdasarkan tanggal (Descending / Baru ke Lama)
+      const dateA = new Date(a.createdAt).getTime();
+      const dateB = new Date(b.createdAt).getTime();
+      
+      return dateB - dateA;
     });
   }, [historyItems, filters]);
 
@@ -145,6 +167,8 @@ export default function AdminOutletRequestPage() {
 
   const getStatusIcon = (status: string) => {
     switch(status) {
+      case 'DRAFT': return <FileText size={12} />;
+      case 'OFFICIAL': return <FileCheck size={12} />;
       case 'PENDING': return <Clock size={12} />;
       case 'PROCESSED': return <ShoppingCart size={12} />;
       case 'SENT': return <PackageCheck size={12} />;
@@ -155,6 +179,8 @@ export default function AdminOutletRequestPage() {
 
   const getStatusStyle = (status: string) => {
     switch(status) {
+      case 'DRAFT': return 'bg-slate-100 text-slate-500 border-slate-200';
+      case 'OFFICIAL': return 'bg-violet-50 text-violet-600 border-violet-100';
       case 'PENDING': return 'bg-amber-50 text-amber-600 border-amber-100';
       case 'PROCESSED': return 'bg-blue-50 text-blue-600 border-blue-100';
       case 'SENT': return 'bg-indigo-50 text-indigo-600 border-indigo-100';
@@ -389,7 +415,6 @@ export default function AdminOutletRequestPage() {
                 <option value="ALL">SEMUA</option>
                 <option value="PENDING">PENDING</option>
                 <option value="PROCESSED">PROCESSED</option>
-                <option value="SENT">SENT</option>
                 <option value="RECEIVED">RECEIVED</option>
               </select>
             </div>
@@ -436,10 +461,10 @@ export default function AdminOutletRequestPage() {
               <table className="w-full text-sm">
                 <thead>
                   <tr className="bg-slate-50/50 text-slate-400 text-left text-[10px] font-bold uppercase tracking-widest border-b">
-                    <th className="px-6 py-4">Tanggal</th>
-                    <th className="px-6 py-4">Item Permintaan</th>
-                    <th className="px-4 py-4 text-center">Req Qty</th>
-                    <th className="px-4 py-4 text-center">Received</th>
+                    <th className="px-6 py-4">Waktu</th>
+                    <th className="px-6 py-4">Item & Outlet</th>
+                    <th className="px-4 py-4 text-center">Qty Request</th>
+                    <th className="px-4 py-4 text-center">Qty Received</th>
                     <th className="px-6 py-4 text-center">Status</th>
                     <th className="px-6 py-4">Catatan</th>
                   </tr>
@@ -455,13 +480,12 @@ export default function AdminOutletRequestPage() {
                         <div className="flex flex-col">
                           <span className="text-slate-700 font-semibold text-xs">
                             {new Date(item.createdAt).toLocaleDateString('id-ID', { 
-                              weekday: 'short', 
                               day: '2-digit', 
                               month: 'short', 
                               year: 'numeric' 
                             })}
                           </span>
-                          <span className="text-[10px] text-indigo-500 font-bold flex items-center gap-1">
+                          <span className="text-[10px] text-slate-400 font-bold flex items-center gap-1">
                             <Clock size={10} />
                             {new Date(item.createdAt).toLocaleTimeString('id-ID', { 
                               hour: '2-digit', 
@@ -472,21 +496,30 @@ export default function AdminOutletRequestPage() {
                       </td>
                       <td className="px-6 py-4">
                         <p className="font-semibold text-slate-800">{item.product?.name || item.tempProductName}</p>
-                        <p className="text-[10px] text-slate-400 uppercase font-bold tracking-wider">{item.product?.itemGroup?.name || 'UMUM'}</p>
+                        <div className="flex items-center gap-2 mt-1">
+                          <span className="flex items-center gap-1 text-[9px] font-black text-indigo-500 bg-indigo-50 px-2 py-0.5 rounded border border-indigo-100 uppercase">
+                            <MapPin size={10} /> {item.purchaseRequest?.outlet?.name || 'Central'}
+                          </span>
+                          <span className="text-[10px] text-slate-400 uppercase font-bold tracking-wider">{item.product?.itemGroup?.name || 'UMUM'}</span>
+                        </div>
                       </td>
                       <td className="px-4 py-4 text-center">
-                        <span className="font-semibold text-slate-700">{item.quantity}</span>
-                        <span className="ml-1 text-[10px] text-slate-400 font-bold">{item.uom}</span>
+                        <div className="inline-flex flex-col items-center">
+                          <span className="font-bold text-slate-700 text-sm">{item.quantity}</span>
+                          <span className="text-[10px] text-slate-400 font-bold uppercase">{item.uom}</span>
+                        </div>
                       </td>
                       <td className="px-4 py-4 text-center">
-                        <div className="flex flex-col items-center">
-                          <span className={`font-bold text-sm ${item.receivedQuantity > 0 ? 'text-emerald-600' : 'text-slate-300'}`}>
+                        <div className="inline-flex flex-col items-center">
+                          {/* 3. Menampilkan Qty Received dari realisasi admin */}
+                          <span className={`font-black text-sm ${item.receivedQuantity > 0 ? 'text-emerald-600' : 'text-slate-300'}`}>
                             {item.receivedQuantity || 0}
                           </span>
+                          <span className={`text-[9px] font-bold uppercase ${item.receivedQuantity > 0 ? 'text-emerald-400' : 'text-slate-300'}`}>CONFIRMED</span>
                         </div>
                       </td>
                       <td className="px-6 py-4 text-center">
-                        <span className={`inline-flex items-center gap-1.5 px-3 py-1 rounded-full text-[10px] font-bold uppercase border tracking-tight ${getStatusStyle(item.status)}`}>
+                        <span className={`inline-flex items-center gap-1.5 px-3 py-1 rounded-full text-[10px] font-black uppercase border tracking-tight ${getStatusStyle(item.status)}`}>
                           {getStatusIcon(item.status)}
                           {item.status}
                         </span>
