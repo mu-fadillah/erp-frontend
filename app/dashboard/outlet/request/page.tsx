@@ -7,8 +7,12 @@ import {
   Search, Plus, History, ClipboardList, Download, 
   Table as TableIcon, FileText, RefreshCw, X, ChevronDown,
   PackageCheck, Clock, ShoppingCart, CheckCircle2,
-  Calendar, Building2, MapPin, FileCheck
+  Calendar, Building2, MapPin, FileCheck, FilterX
 } from 'lucide-react';
+// Import library untuk export (Pastikan sudah install: npm install xlsx jspdf jspdf-autotable)
+import * as XLSX from 'xlsx';
+import jsPDF from 'jspdf';
+import 'jspdf-autotable';
 
 export default function AdminOutletRequestPage() {
   const [activeTab, setActiveTab] = useState<'form' | 'history'>('form');
@@ -23,13 +27,15 @@ export default function AdminOutletRequestPage() {
   const [showExportMenu, setShowExportMenu] = useState(false);
   const exportMenuRef = useRef<HTMLDivElement>(null);
 
-  const [filters, setFilters] = useState({
+  const initialFilters = {
     startDate: '',
     endDate: '',
     searchTerm: '',
     status: 'ALL',
     itemGroupId: 'ALL'
-  });
+  };
+
+  const [filters, setFilters] = useState(initialFilters);
   
   const API_URL = 'http://localhost:3000'; 
 
@@ -66,7 +72,6 @@ export default function AdminOutletRequestPage() {
   const fetchHistory = async () => {
     setLoading(true);
     try {
-      // Tambahkan timestamp agar tidak terkena cache browser
       const res = await fetch(`${API_URL}/purchasing/pr/history?t=${Date.now()}`, {
         cache: 'no-store'
       });
@@ -80,8 +85,62 @@ export default function AdminOutletRequestPage() {
     }
   };
 
+  const clearFilters = () => {
+    setFilters(initialFilters);
+  };
+
+  // --- LOGIKA EXPORT EXCEL ---
+  const exportToExcel = () => {
+    const dataToExport = filteredHistory.map(item => ({
+      'Tanggal Request': new Date(item.createdAt).toLocaleDateString('id-ID'),
+      'Outlet': item.purchaseRequest?.outlet?.name || 'Central',
+      'SKU': item.product?.sku || item.product?.code || '-', // Kolom Baru
+      'Nama Barang': item.product?.name || item.tempProductName,
+      'Qty Request': item.quantity,
+      'Qty Received': item.receivedQuantity || 0,
+      'Status': item.status,
+      'Tanggal Diterima': item.receivedDate ? new Date(item.receivedDate).toLocaleDateString('id-ID') : '-',
+      'Catatan': item.notes || '-'
+    }));
+
+    const ws = XLSX.utils.json_to_sheet(dataToExport);
+    const wb = XLSX.utils.book_new();
+    XLSX.utils.book_append_sheet(wb, ws, "History PR");
+    XLSX.writeFile(wb, `PR_History_${new Date().getTime()}.xlsx`);
+    setShowExportMenu(false);
+  };
+
+  // --- LOGIKA EXPORT PDF ---
+  const exportToPDF = () => {
+    const doc = new jsPDF();
+    // Menambahkan "SKU" ke dalam header kolom
+    const tableColumn = ["Tanggal", "Outlet", "SKU", "Item", "Qty Req", "Qty Rec", "Status"];
+    
+    const tableRows = filteredHistory.map(item => [
+      new Date(item.createdAt).toLocaleDateString('id-ID'),
+      item.purchaseRequest?.outlet?.name || 'Central',
+      item.product?.sku || item.product?.code || '-', // Data SKU Baru
+      item.product?.name || item.tempProductName,
+      item.quantity,
+      item.receivedQuantity || 0,
+      item.status
+    ]);
+
+    (doc as any).autoTable({
+      head: [tableColumn],
+      body: tableRows,
+      startY: 20,
+      styles: { fontSize: 8 }, // Sedikit diperkecil karena kolom bertambah
+      headStyles: { fillColor: [15, 23, 42] } // Warna Slate-900 agar matching dengan UI
+    });
+
+    doc.setFontSize(14);
+    doc.text("Riwayat Purchase Request", 14, 15);
+    doc.save(`PR_History_${new Date().getTime()}.pdf`);
+    setShowExportMenu(false);
+  };
+
   const filteredHistory = useMemo(() => {
-    // 1. Filter data terlebih dahulu
     const filtered = historyItems.filter((item: any) => {
       const prod = item.product || {};
       const itemName = (prod.name || item.tempProductName || '').toLowerCase();
@@ -96,24 +155,16 @@ export default function AdminOutletRequestPage() {
       return matchSearch && matchStatus && matchGroup && matchStart && matchEnd;
     });
 
-    // 2. Logic Sortir: Nama Outlet (A-Z) -> Tanggal (Terbaru ke Terlama)
     return filtered.sort((a, b) => {
       const outletA = (a.purchaseRequest?.outlet?.name || 'Z-Tanpa Nama').toLowerCase();
       const outletB = (b.purchaseRequest?.outlet?.name || 'Z-Tanpa Nama').toLowerCase();
 
-      // Jika nama outlet berbeda, urutkan A-Z (Ascending)
-      if (outletA !== outletB) {
-        return outletA.localeCompare(outletB);
-      }
-
-      // Jika outletnya sama, urutkan berdasarkan tanggal (Descending / Baru ke Lama)
-      const dateA = new Date(a.createdAt).getTime();
-      const dateB = new Date(b.createdAt).getTime();
-      
-      return dateB - dateA;
+      if (outletA !== outletB) return outletA.localeCompare(outletB);
+      return new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime();
     });
   }, [historyItems, filters]);
 
+  // (Fungsi addToCart & handleSendRequest tetap sama seperti snippet Anda...)
   const addToCart = (product?: any) => {
     const newItem = product ? {
       productId: product.id, 
@@ -200,16 +251,10 @@ export default function AdminOutletRequestPage() {
         </div>
         
         <div className="flex bg-slate-200/50 p-1 rounded-xl w-fit border border-slate-200">
-          <button 
-            onClick={() => setActiveTab('form')} 
-            className={`flex items-center gap-2 px-6 py-2 rounded-lg text-xs font-semibold transition-all ${activeTab === 'form' ? 'bg-white text-indigo-600 shadow-sm' : 'text-slate-500 hover:text-slate-700'}`}
-          >
+          <button onClick={() => setActiveTab('form')} className={`flex items-center gap-2 px-6 py-2 rounded-lg text-xs font-semibold transition-all ${activeTab === 'form' ? 'bg-white text-indigo-600 shadow-sm' : 'text-slate-500 hover:text-slate-700'}`}>
             <ClipboardList size={14} /> Request Form
           </button>
-          <button 
-            onClick={() => setActiveTab('history')} 
-            className={`flex items-center gap-2 px-6 py-2 rounded-lg text-xs font-semibold transition-all ${activeTab === 'history' ? 'bg-white text-indigo-600 shadow-sm' : 'text-slate-500 hover:text-slate-700'}`}
-          >
+          <button onClick={() => setActiveTab('history')} className={`flex items-center gap-2 px-6 py-2 rounded-lg text-xs font-semibold transition-all ${activeTab === 'history' ? 'bg-white text-indigo-600 shadow-sm' : 'text-slate-500 hover:text-slate-700'}`}>
             <History size={14} /> History
           </button>
         </div>
@@ -217,8 +262,8 @@ export default function AdminOutletRequestPage() {
 
       {activeTab === 'form' ? (
         <div className="grid grid-cols-1 lg:grid-cols-3 gap-6 animate-in fade-in duration-300">
-          {/* Left Column: Search & Add */}
-          <div className="lg:col-span-1 space-y-6">
+             {/* Left Column: Search & Add */}
+             <div className="lg:col-span-1 space-y-6">
             <div className="bg-white p-6 rounded-2xl border border-slate-200 shadow-sm">
               <label className="text-xs font-bold text-slate-400 uppercase tracking-widest block mb-4">Cari Produk</label>
               <div className="relative">
@@ -426,6 +471,14 @@ export default function AdminOutletRequestPage() {
               <label className="text-[10px] font-bold text-slate-400 uppercase tracking-widest block mb-2 flex items-center gap-1"><Calendar size={10}/> Sampai</label>
               <input type="date" className="w-full p-2 bg-slate-50 border border-slate-200 rounded-lg text-xs outline-none font-semibold" value={filters.endDate} onChange={e => setFilters({...filters, endDate: e.target.value})}/>
             </div>
+            
+            {/* Tombol Clear Filter */}
+            <button 
+              onClick={clearFilters}
+              className="flex items-center gap-2 px-4 py-2 bg-rose-50 text-rose-600 rounded-lg text-xs font-bold hover:bg-rose-100 transition-colors border border-rose-100"
+            >
+              <FilterX size={14} /> Clear
+            </button>
           </div>
 
           <div className="bg-white rounded-2xl border border-slate-200 shadow-sm overflow-hidden">
@@ -446,10 +499,10 @@ export default function AdminOutletRequestPage() {
                 </button>
                 {showExportMenu && (
                   <div className="absolute top-full right-0 mt-2 w-48 bg-white border border-slate-200 rounded-xl shadow-xl z-50 overflow-hidden animate-in zoom-in-95 duration-100">
-                    <button className="w-full px-4 py-3 text-left text-xs font-semibold hover:bg-slate-50 flex items-center gap-3 transition-colors border-b border-slate-50 text-slate-700">
+                    <button onClick={exportToExcel} className="w-full px-4 py-3 text-left text-xs font-semibold hover:bg-slate-50 flex items-center gap-3 transition-colors border-b border-slate-50 text-slate-700">
                       <TableIcon size={16} className="text-emerald-600" /> Excel Spreadsheet
                     </button>
-                    <button className="w-full px-4 py-3 text-left text-xs font-semibold hover:bg-slate-50 flex items-center gap-3 transition-colors text-slate-700">
+                    <button onClick={exportToPDF} className="w-full px-4 py-3 text-left text-xs font-semibold hover:bg-slate-50 flex items-center gap-3 transition-colors text-slate-700">
                       <FileText size={16} className="text-rose-600" /> PDF Document
                     </button>
                   </div>
@@ -461,40 +514,33 @@ export default function AdminOutletRequestPage() {
               <table className="w-full text-sm">
                 <thead>
                   <tr className="bg-slate-50/50 text-slate-400 text-left text-[10px] font-bold uppercase tracking-widest border-b">
-                    <th className="px-6 py-4">Waktu</th>
+                    <th className="px-6 py-4">Waktu Request</th>
                     <th className="px-6 py-4">Item & Outlet</th>
                     <th className="px-4 py-4 text-center">Qty Request</th>
                     <th className="px-4 py-4 text-center">Qty Received</th>
+                    <th className="px-6 py-4 text-center">Received At</th>
                     <th className="px-6 py-4 text-center">Status</th>
                     <th className="px-6 py-4">Catatan</th>
                   </tr>
                 </thead>
                 <tbody className="divide-y divide-slate-100">
                   {loading ? (
-                    <tr><td colSpan={6} className="py-20 text-center"><RefreshCw className="animate-spin mx-auto text-indigo-400 mb-2"/> <p className="text-xs font-medium text-slate-400">Memuat data...</p></td></tr>
+                    <tr><td colSpan={7} className="py-20 text-center"><RefreshCw className="animate-spin mx-auto text-indigo-400 mb-2"/> <p className="text-xs font-medium text-slate-400">Memuat data...</p></td></tr>
                   ) : filteredHistory.length === 0 ? (
-                    <tr><td colSpan={6} className="py-20 text-center text-slate-400 text-xs font-medium">Data tidak ditemukan</td></tr>
+                    <tr><td colSpan={7} className="py-20 text-center text-slate-400 text-xs font-medium">Data tidak ditemukan</td></tr>
                   ) : filteredHistory.map((item: any) => (
                     <tr key={item.id} className="hover:bg-slate-50/30 transition-colors">
                       <td className="px-6 py-4">
                         <div className="flex flex-col">
                           <span className="text-slate-700 font-semibold text-xs">
-                            {new Date(item.createdAt).toLocaleDateString('id-ID', { 
-                              day: '2-digit', 
-                              month: 'short', 
-                              year: 'numeric' 
-                            })}
+                            {new Date(item.createdAt).toLocaleDateString('id-ID', { day: '2-digit', month: 'short', year: 'numeric' })}
                           </span>
                           <span className="text-[10px] text-slate-400 font-bold flex items-center gap-1">
-                            <Clock size={10} />
-                            {new Date(item.createdAt).toLocaleTimeString('id-ID', { 
-                              hour: '2-digit', 
-                              minute: '2-digit' 
-                            })}
+                            <Clock size={10} /> {new Date(item.createdAt).toLocaleTimeString('id-ID', { hour: '2-digit', minute: '2-digit' })}
                           </span>
                         </div>
                       </td>
-                      <td className="px-6 py-4">
+                       <td className="px-6 py-4">
                         <p className="font-semibold text-slate-800">{item.product?.name || item.tempProductName}</p>
                         <div className="flex items-center gap-2 mt-1">
                           <span className="flex items-center gap-1 text-[9px] font-black text-indigo-500 bg-indigo-50 px-2 py-0.5 rounded border border-indigo-100 uppercase">
@@ -511,12 +557,24 @@ export default function AdminOutletRequestPage() {
                       </td>
                       <td className="px-4 py-4 text-center">
                         <div className="inline-flex flex-col items-center">
-                          {/* 3. Menampilkan Qty Received dari realisasi admin */}
                           <span className={`font-black text-sm ${item.receivedQuantity > 0 ? 'text-emerald-600' : 'text-slate-300'}`}>
                             {item.receivedQuantity || 0}
                           </span>
                           <span className={`text-[9px] font-bold uppercase ${item.receivedQuantity > 0 ? 'text-emerald-400' : 'text-slate-300'}`}>CONFIRMED</span>
                         </div>
+                      </td>
+                      {/* Kolom Tanggal Kedatangan Baru */}
+                      <td className="px-6 py-4 text-center">
+                        {item.status === 'RECEIVED' && item.receivedDate ? (
+                          <div className="flex flex-col">
+                            <span className="text-emerald-700 font-bold text-[11px]">
+                                {new Date(item.receivedDate).toLocaleDateString('id-ID', { day: '2-digit', month: 'short' })}
+                            </span>
+                            <span className="text-[9px] text-emerald-500 font-medium italic">Sampai</span>
+                          </div>
+                        ) : (
+                          <span className="text-slate-300 text-[10px]">-</span>
+                        )}
                       </td>
                       <td className="px-6 py-4 text-center">
                         <span className={`inline-flex items-center gap-1.5 px-3 py-1 rounded-full text-[10px] font-black uppercase border tracking-tight ${getStatusStyle(item.status)}`}>

@@ -19,7 +19,6 @@ export default function OutletSetupPage() {
   const [isModalOpen, setIsModalOpen] = useState(false);
   const [searchTerm, setSearchTerm] = useState('');
   
-  // Form State [cite: 2026-01-29]
   const [editingId, setEditingId] = useState<string | null>(null);
   const [formData, setFormData] = useState({
     name: '',
@@ -105,77 +104,77 @@ export default function OutletSetupPage() {
   );
 
   return (
-    <div className="p-4 md:p-8">
-      {/* Header & Add Button */}
-      <div className="flex flex-col md:flex-row md:items-center justify-between gap-4 mb-10">
+    <div className="p-4 md:p-8 max-w-[1400px] mx-auto min-h-screen">
+      {/* Header Section */}
+      <div className="flex flex-col md:flex-row md:items-end justify-between gap-6 mb-12">
         <div>
-          <h1 className="text-3xl font-black text-slate-900 tracking-tight uppercase">Master Outlet</h1>
-          <p className="text-slate-500 text-sm font-medium mt-1">Registrasi dan manajemen lokasi operasional Camden Group</p>
+          <h1 className="text-3xl font-semibold text-slate-800 tracking-tight">Outlets</h1>
+          <p className="text-sm text-slate-500 mt-1 font-medium">Manage operational locations and point of contacts.</p>
         </div>
-        <button 
-          onClick={() => openModal()}
-          className="flex items-center justify-center gap-2 bg-indigo-600 hover:bg-indigo-700 text-white px-6 py-3 rounded-2xl font-bold text-sm transition-all shadow-lg shadow-indigo-200 active:scale-95"
-        >
-          <Plus size={20} strokeWidth={3} />
-          TAMBAH OUTLET
-        </button>
-      </div>
-
-      {/* Search Bar */}
-      <div className="relative mb-8">
-        <Search className="absolute left-5 top-1/2 -translate-y-1/2 text-slate-400" size={20} />
-        <input 
-          type="text"
-          placeholder="Cari berdasarkan nama atau PIC..."
-          className="w-full pl-14 pr-6 py-5 bg-white border-2 border-slate-100 rounded-2xl outline-none focus:border-indigo-500 transition-all text-sm font-bold shadow-sm"
-          value={searchTerm}
-          onChange={(e) => setSearchTerm(e.target.value)}
-        />
+        
+        <div className="flex items-center gap-3">
+          <div className="relative group">
+            <Search className="absolute left-4 top-1/2 -translate-y-1/2 text-slate-400 group-focus-within:text-indigo-500 transition-colors" size={18} />
+            <input 
+              type="text"
+              placeholder="Filter outlet..."
+              className="pl-11 pr-4 py-2.5 bg-white border border-slate-200 rounded-2xl text-sm w-full md:w-72 focus:ring-4 focus:ring-indigo-500/5 focus:border-indigo-400 outline-none transition-all shadow-sm font-medium"
+              value={searchTerm}
+              onChange={(e) => setSearchTerm(e.target.value)}
+            />
+          </div>
+          <button 
+            onClick={() => openModal()}
+            className="flex items-center gap-2 bg-indigo-600 hover:bg-indigo-700 text-white px-6 py-2.5 rounded-2xl text-sm font-semibold transition-all active:scale-95 shadow-md shadow-indigo-200"
+          >
+            <Plus size={20} /> Add Outlet
+          </button>
+        </div>
       </div>
 
       {/* Grid Content */}
       {loading ? (
-        <div className="flex flex-col items-center justify-center py-32 bg-white rounded-3xl border-2 border-dashed border-slate-200">
-          <Loader2 className="animate-spin text-indigo-600 mb-4" size={40} />
-          <p className="text-slate-400 font-bold uppercase tracking-widest text-xs">Menghubungkan ke Database...</p>
+        <div className="flex flex-col items-center justify-center py-32 bg-white/50 rounded-[2.5rem] border border-dashed border-slate-200">
+          <Loader2 className="animate-spin text-indigo-500 mb-4" size={32} />
+          <p className="text-sm font-medium text-slate-400">Connecting to database...</p>
         </div>
       ) : (
-        <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6">
+        <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-8">
           {filteredOutlets.map((outlet) => (
-            <div key={outlet.id} className="bg-white rounded-3xl border-2 border-slate-50 p-6 hover:border-indigo-200 transition-all group relative shadow-sm">
+            <div key={outlet.id} className="bg-white p-7 rounded-[2.5rem] border border-slate-100 shadow-sm hover:shadow-xl hover:shadow-indigo-500/5 transition-all duration-300 group relative">
               <div className="flex justify-between items-start mb-6">
                 <div className="w-14 h-14 bg-indigo-50 rounded-2xl flex items-center justify-center text-indigo-600 group-hover:bg-indigo-600 group-hover:text-white transition-all duration-300">
-                  <Building2 size={28} />
+                  <Building2 size={24} />
                 </div>
-                <div className="flex gap-1">
-                  <button onClick={() => openModal(outlet)} className="p-2 hover:bg-slate-100 rounded-xl text-slate-400 hover:text-indigo-600 transition-colors">
+                <div className="flex gap-1 opacity-0 group-hover:opacity-100 transition-opacity duration-300">
+                  <button onClick={() => openModal(outlet)} className="p-2 text-slate-400 hover:text-indigo-600 transition-colors">
                     <Edit2 size={18} />
                   </button>
-                  <button onClick={() => handleDelete(outlet.id)} className="p-2 hover:bg-rose-50 rounded-xl text-slate-400 hover:text-rose-600 transition-colors">
+                  <button onClick={() => handleDelete(outlet.id)} className="p-2 text-slate-400 hover:text-red-500 transition-colors">
                     <Trash2 size={18} />
                   </button>
                 </div>
               </div>
               
-              <h3 className="font-black text-slate-900 uppercase tracking-tight text-xl mb-6 leading-tight">{outlet.name}</h3>
+              <h3 className="text-lg font-semibold text-slate-800 mb-6 truncate">{outlet.name}</h3>
               
-              <div className="space-y-4 pt-4 border-t border-slate-50">
+              <div className="space-y-4 pt-5 border-t border-slate-50">
                 <div className="flex items-center gap-3">
-                  <div className="w-8 h-8 rounded-lg bg-slate-50 flex items-center justify-center text-slate-400">
-                    <User size={14} />
+                  <div className="w-9 h-9 rounded-xl bg-slate-50 flex items-center justify-center text-slate-400">
+                    <User size={16} />
                   </div>
                   <div className="flex flex-col">
-                    <span className="text-[10px] font-bold text-slate-400 uppercase tracking-widest">PIC</span>
-                    <span className="text-xs font-black text-slate-700">{outlet.picName || 'N/A'}</span>
+                    <span className="text-[10px] font-semibold text-slate-400 uppercase tracking-wider">PIC Manager</span>
+                    <span className="text-sm font-medium text-slate-700">{outlet.picName || 'Unassigned'}</span>
                   </div>
                 </div>
                 <div className="flex items-start gap-3">
-                  <div className="w-8 h-8 rounded-lg bg-slate-50 flex items-center justify-center text-slate-400">
-                    <MapPin size={14} />
+                  <div className="w-9 h-9 rounded-xl bg-slate-50 flex items-center justify-center text-slate-400">
+                    <MapPin size={16} />
                   </div>
                   <div className="flex flex-col">
-                    <span className="text-[10px] font-bold text-slate-400 uppercase tracking-widest">Alamat</span>
-                    <span className="text-xs font-medium text-slate-500 leading-relaxed">{outlet.address || 'Belum diatur'}</span>
+                    <span className="text-[10px] font-semibold text-slate-400 uppercase tracking-wider">Address</span>
+                    <span className="text-xs font-medium text-slate-500 leading-relaxed">{outlet.address || 'No address set'}</span>
                   </div>
                 </div>
               </div>
@@ -186,52 +185,60 @@ export default function OutletSetupPage() {
 
       {/* Modal CRUD */}
       {isModalOpen && (
-        <div className="fixed inset-0 bg-slate-900/60 backdrop-blur-sm z-[100] flex items-center justify-center p-4">
-          <div className="bg-white w-full max-w-md rounded-[2.5rem] shadow-2xl overflow-hidden animate-in fade-in zoom-in-95 duration-200">
-            <div className="px-8 py-6 border-b border-slate-50 flex justify-between items-center bg-slate-50/50">
-              <h2 className="font-black text-slate-900 uppercase tracking-tight">
-                {editingId ? 'Edit Data Outlet' : 'Registrasi Outlet'}
-              </h2>
-              <button onClick={closeModal} className="w-10 h-10 flex items-center justify-center bg-white rounded-xl text-slate-400 hover:text-rose-500 shadow-sm transition-all">
-                <X size={20} />
-              </button>
+        <div className="fixed inset-0 z-[100] flex items-center justify-center p-4">
+          <div className="absolute inset-0 bg-slate-900/40 backdrop-blur-sm" onClick={closeModal} />
+          <div className="relative bg-white w-full max-w-lg rounded-[3rem] shadow-2xl overflow-hidden animate-in fade-in zoom-in-95 duration-200">
+            <div className="p-10">
+              <div className="flex justify-between items-center mb-10">
+                <div>
+                  <h2 className="text-2xl font-semibold text-slate-800">
+                    {editingId ? 'Edit Outlet' : 'Register Outlet'}
+                  </h2>
+                  <p className="text-sm text-slate-500 mt-1">Operational location details.</p>
+                </div>
+                <button onClick={closeModal} className="p-2 bg-slate-50 text-slate-400 rounded-full hover:bg-slate-100 transition-colors">
+                  <X size={24} />
+                </button>
+              </div>
+
+              <form onSubmit={handleSubmit} className="space-y-6">
+                <div>
+                  <label className="text-xs font-semibold text-slate-500 ml-1">Outlet Name</label>
+                  <input 
+                    required
+                    className="w-full mt-2 px-5 py-3.5 bg-slate-50 border border-slate-100 rounded-2xl text-sm font-medium focus:bg-white focus:ring-4 focus:ring-indigo-500/5 focus:border-indigo-400 outline-none transition-all"
+                    placeholder="e.g. Camden Sudirman"
+                    value={formData.name}
+                    onChange={(e) => setFormData({...formData, name: e.target.value})}
+                  />
+                </div>
+                <div>
+                  <label className="text-xs font-semibold text-slate-500 ml-1">PIC Manager</label>
+                  <input 
+                    className="w-full mt-2 px-5 py-3.5 bg-slate-50 border border-slate-100 rounded-2xl text-sm font-medium focus:ring-4 focus:ring-indigo-500/5 outline-none transition-all"
+                    placeholder="Name of person in charge"
+                    value={formData.picName}
+                    onChange={(e) => setFormData({...formData, picName: e.target.value})}
+                  />
+                </div>
+                <div>
+                  <label className="text-xs font-semibold text-slate-500 ml-1">Full Address</label>
+                  <textarea 
+                    rows={3}
+                    className="w-full mt-2 px-5 py-3.5 bg-slate-50 border border-slate-100 rounded-2xl text-sm font-medium focus:ring-4 focus:ring-indigo-500/5 outline-none transition-all resize-none"
+                    placeholder="Complete address..."
+                    value={formData.address}
+                    onChange={(e) => setFormData({...formData, address: e.target.value})}
+                  />
+                </div>
+                <button 
+                  type="submit"
+                  className="w-full bg-slate-900 text-white py-4 rounded-2xl font-semibold text-sm hover:bg-indigo-600 transition-all active:scale-[0.98] mt-4 shadow-lg shadow-slate-200 uppercase tracking-wider"
+                >
+                  {editingId ? 'Update Outlet' : 'Create Outlet'}
+                </button>
+              </form>
             </div>
-            <form onSubmit={handleSubmit} className="p-8 space-y-5">
-              <div>
-                <label className="block text-[10px] font-bold text-slate-400 uppercase tracking-widest mb-2 ml-1">Nama Outlet</label>
-                <input 
-                  required
-                  className="w-full px-5 py-4 bg-slate-50 border-2 border-slate-100 rounded-2xl outline-none focus:border-indigo-500 transition-all text-sm font-bold"
-                  placeholder="Contoh: Camden Sudirman"
-                  value={formData.name}
-                  onChange={(e) => setFormData({...formData, name: e.target.value})}
-                />
-              </div>
-              <div>
-                <label className="block text-[10px] font-bold text-slate-400 uppercase tracking-widest mb-2 ml-1">Nama PIC</label>
-                <input 
-                  className="w-full px-5 py-4 bg-slate-50 border-2 border-slate-100 rounded-2xl outline-none focus:border-indigo-500 transition-all text-sm font-bold"
-                  placeholder="Penanggung Jawab"
-                  value={formData.picName}
-                  onChange={(e) => setFormData({...formData, picName: e.target.value})}
-                />
-              </div>
-              <div>
-                <label className="block text-[10px] font-bold text-slate-400 uppercase tracking-widest mb-2 ml-1">Alamat Lengkap</label>
-                <textarea 
-                  className="w-full px-5 py-4 bg-slate-50 border-2 border-slate-100 rounded-2xl outline-none focus:border-indigo-500 transition-all text-sm font-medium h-28 resize-none shadow-inner"
-                  placeholder="Jl. Raya No..."
-                  value={formData.address}
-                  onChange={(e) => setFormData({...formData, address: e.target.value})}
-                ></textarea>
-              </div>
-              <button 
-                type="submit"
-                className="w-full bg-indigo-600 hover:bg-indigo-700 text-white py-5 rounded-[1.5rem] font-black text-sm transition-all shadow-xl shadow-indigo-100 active:scale-[0.98] mt-4 uppercase tracking-widest"
-              >
-                {editingId ? 'PERBARUI DATA' : 'SIMPAN OUTLET'}
-              </button>
-            </form>
           </div>
         </div>
       )}

@@ -1,6 +1,6 @@
 /* eslint-disable @typescript-eslint/no-explicit-any */
 'use client';
-import { useState, useEffect, useCallback } from 'react';
+import { useState, useEffect, useCallback, useMemo } from 'react';
 import { 
   Package, 
   RefreshCcw, 
@@ -13,17 +13,22 @@ import {
   Building2,
   ClipboardCheck,
   MapPin,
-  CheckCircle2
+  Calendar // Pastikan ini di-import
 } from 'lucide-react';
 
 interface PurchasingItem {
   id: string;
-  product: { name: string; code: string };
+  product: { name: string; code: string; sku?: string };
   quantity: number;
   receivedQuantity: number;
   uom?: string;
-  // Tambahan meta untuk identifikasi outlet per item jika diperlukan
-  outletName?: string; 
+  prItem?: {
+    purchaseRequest?: {
+      outlet?: {
+        name: string;
+      };
+    };
+  };
 }
 
 interface POData {
@@ -31,7 +36,7 @@ interface POData {
   orderNumber: string;
   status: string;
   supplier: { name: string };
-  outlet?: { name: string }; // Penambahan relasi outlet
+  outlet?: { name: string }; 
   items: PurchasingItem[];
 }
 
@@ -51,12 +56,15 @@ export default function ReceivingPage() {
   const fetchActivePOs = useCallback(async () => {
     try {
       setLoading(true);
-      // Mengambil PO dengan status SENT
       const res = await fetch(`${API_URL}/purchasing/po/list?status=SENT`);
       if (!res.ok) throw new Error("Gagal mengambil data");
       const data = await res.json();
       
-      const onlySent = data.filter((po: any) => po.status === 'SENT');
+      // Filter status SENT dan urutkan PO berdasarkan Order Number
+      const onlySent = data
+        .filter((po: any) => po.status === 'SENT')
+        .sort((a: any, b: any) => b.orderNumber.localeCompare(a.orderNumber));
+
       setActivePOs(onlySent);
     } catch (err) {
       console.error("Error fetching POs:", err);
@@ -119,7 +127,7 @@ export default function ReceivingPage() {
       return;
     }
 
-    if (!confirm("Konfirmasi penerimaan barang? Stok akan langsung bertambah.")) return;
+    if (!confirm(`Konfirmasi penerimaan ${itemsToSubmit.length} item? Tanggal hari ini akan dicatat sebagai waktu penerimaan.`)) return;
 
     try {
       const res = await fetch(`${API_URL}/purchasing/po/receive`, {
@@ -132,32 +140,34 @@ export default function ReceivingPage() {
 
       alert("Penerimaan barang berhasil dicatat!");
       setReceiveData({});
-      fetchActivePOs(); // Refresh untuk menghilangkan item/PO yang sudah RECEIVED
+      fetchActivePOs(); 
     } catch (err) {
       alert("Terjadi kesalahan saat memproses penerimaan.");
     }
   };
 
-  if (loading) return (
-    <div className="flex flex-col items-center justify-center min-h-screen bg-slate-50">
-      <Loader2 className="animate-spin text-orange-600 mb-4" size={40} />
-      <p className="text-[10px] font-black uppercase tracking-[0.2em] text-slate-400">Menghubungkan ke Gudang...</p>
-    </div>
-  );
-
   return (
     <div className="p-4 md:p-8 max-w-6xl mx-auto bg-slate-50 min-h-screen pb-32">
-      {/* Header Section */}
       <div className="flex justify-between items-center mb-10">
         <div>
           <h1 className="text-3xl font-black text-slate-900 tracking-tight text-[10px] uppercase tracking-[0.2em]">Receiving</h1>
           <p className="text-[11px] font-bold text-slate-500 uppercase tracking-widest mt-1">Konfirmasi Stok Masuk per Item & Outlet</p>
         </div>
-        {/* ... Button Refresh */}
+        <button 
+          onClick={fetchActivePOs}
+          className="p-3 bg-white border border-slate-200 rounded-2xl text-slate-400 hover:text-orange-600 transition-colors shadow-sm"
+        >
+          <RefreshCcw size={20} className={loading ? 'animate-spin' : ''} />
+        </button>
       </div>
 
       <div className="space-y-6">
-        {activePOs.length === 0 ? (
+        {loading ? (
+          <div className="flex flex-col items-center justify-center p-20">
+            <Loader2 className="animate-spin text-orange-600 mb-4" size={40} />
+            <p className="text-[10px] font-black uppercase tracking-[0.2em] text-slate-400">Loading Warehouse Data...</p>
+          </div>
+        ) : activePOs.length === 0 ? (
           <div className="bg-white p-20 rounded-[40px] text-center border-2 border-dashed border-slate-200">
              <Package size={40} className="text-slate-200 mx-auto mb-4" />
              <p className="text-slate-400 font-bold text-sm uppercase">Belum ada PO untuk diterima.</p>
@@ -165,9 +175,16 @@ export default function ReceivingPage() {
         ) : (
           activePOs.map((po) => {
             const isExpanded = expandedPOs[po.id] || false;
+            
+            // LOGIKA SORTIR: Mengurutkan item berdasarkan nama outlet secara ascending
+            const sortedItems = [...po.items].sort((a, b) => {
+              const outletA = a.prItem?.purchaseRequest?.outlet?.name || po.outlet?.name || 'Central';
+              const outletB = b.prItem?.purchaseRequest?.outlet?.name || po.outlet?.name || 'Central';
+              return outletA.localeCompare(outletB);
+            });
+
             return (
               <div key={po.id} className="bg-white rounded-3xl shadow-sm border border-slate-200 overflow-hidden">
-                {/* Header Vendor Tetap Bersih */}
                 <div 
                   onClick={() => togglePO(po.id)}
                   className="p-5 flex flex-col md:flex-row md:items-center justify-between cursor-pointer hover:bg-slate-50 transition-colors gap-4"
@@ -200,7 +217,6 @@ export default function ReceivingPage() {
                   </div>
                 </div>
 
-                {/* Table Content dengan Kolom Outlet */}
                 {isExpanded && (
                   <div className="border-t border-slate-100 animate-in slide-in-from-top-2">
                     <div className="overflow-x-auto">
@@ -214,11 +230,10 @@ export default function ReceivingPage() {
                           </tr>
                         </thead>
                         <tbody className="divide-y divide-slate-50">
-                          {po.items.map((item: any) => {
+                          {sortedItems.map((item) => {
                             const remaining = item.quantity - item.receivedQuantity;
                             const currentInput = receiveData[item.id]?.amount || 0;
                             
-                            // Mendapatkan nama outlet per item
                             const itemOutlet = item.prItem?.purchaseRequest?.outlet?.name || po.outlet?.name || 'Central';
 
                             if (remaining <= 0) return null;
@@ -226,12 +241,16 @@ export default function ReceivingPage() {
                             return (
                               <tr key={item.id} className="group hover:bg-slate-50/30 transition-colors">
                                 <td className="px-6 py-4">
-                                  <p className="text-sm font-bold text-slate-700 uppercase tracking-tight text-[10px] uppercase tracking-[0.2em]">{item.product?.name}</p>
+                                  <p className="text-sm font-bold text-slate-700 uppercase tracking-tight">
+                                    {item.product?.name}
+                                  </p>
                                   <div className="flex items-center gap-2 mt-1">
-                                    <span className="flex items-center gap-1 text-[9px] font-black text-indigo-600 bg-indigo-50 px-2 py-0.5 rounded border border-indigo-100 uppercase tracking-tight text-[10px] uppercase tracking-[0.2em]">
+                                    <span className="text-[9px] font-mono font-bold bg-slate-100 text-slate-500 px-1.5 py-0.5 rounded">
+                                      {item.product?.sku || item.product?.code || '-'}
+                                    </span>
+                                    <span className="flex items-center gap-1 text-[9px] font-black text-indigo-600 bg-indigo-50 px-2 py-0.5 rounded border border-indigo-100 uppercase">
                                       <MapPin size={10} /> {itemOutlet}
                                     </span>
-                                    <span className="text-[10px] text-slate-400 font-bold uppercase">Order: {item.quantity}</span>
                                   </div>
                                 </td>
                                 <td className="px-6 py-4 text-center">
@@ -251,18 +270,24 @@ export default function ReceivingPage() {
                                   </div>
                                 </td>
                                 <td className="px-6 py-4">
-                                  {currentInput > 0 && currentInput !== remaining ? (
-                                    <input 
-                                      type="text"
-                                      value={receiveData[item.id]?.notes || ''}
-                                      onChange={(e) => handleInputChange(item.id, 'notes', e.target.value)}
-                                      placeholder="Alasan selisih..."
-                                      className="w-full px-3 py-2 rounded-lg bg-rose-50 border border-rose-100 text-[11px] font-bold text-rose-700 outline-none"
-                                    />
+                                  {currentInput > 0 ? (
+                                    <div className="flex flex-col gap-1">
+                                      {currentInput !== remaining && (
+                                        <input 
+                                          type="text"
+                                          value={receiveData[item.id]?.notes || ''}
+                                          onChange={(e) => handleInputChange(item.id, 'notes', e.target.value)}
+                                          placeholder="Alasan selisih..."
+                                          className="w-full px-3 py-2 rounded-lg bg-rose-50 border border-rose-100 text-[11px] font-bold text-rose-700 outline-none"
+                                        />
+                                      )}
+                                      <div className="flex items-center gap-1 text-[9px] font-bold text-emerald-600 bg-emerald-50 px-2 py-1 rounded w-fit uppercase">
+                                        <Calendar size={10} /> {new Date().toLocaleDateString('id-ID')}
+                                      </div>
+                                    </div>
                                   ) : (
-                                    <span className="text-[10px] text-slate-300 italic flex items-center gap-1">
-                                      {currentInput === remaining && currentInput > 0 && <CheckCircle2 size={12} className="text-emerald-500"/>}
-                                      {currentInput === remaining && currentInput > 0 ? 'Ready to sync' : 'Waiting...'}
+                                    <span className="text-[10px] text-slate-300 italic flex items-center gap-1 uppercase">
+                                      Waiting for input...
                                     </span>
                                   )}
                                 </td>
@@ -272,7 +297,6 @@ export default function ReceivingPage() {
                         </tbody>
                       </table>
                     </div>
-                    {/* Action Footer for PO */}
                     <div className="p-6 bg-slate-50/50 flex justify-end">
                       <button 
                         onClick={() => submitReceiving(po.id)}
@@ -292,5 +316,4 @@ export default function ReceivingPage() {
       </div>
     </div>
   );
-
 }
