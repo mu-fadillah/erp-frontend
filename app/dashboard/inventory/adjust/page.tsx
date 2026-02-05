@@ -1,6 +1,6 @@
 /* eslint-disable @typescript-eslint/no-explicit-any */
 'use client';
-import { useState, useEffect } from 'react';
+import { useState, useEffect, useMemo } from 'react';
 import { 
   Save, 
   History, 
@@ -10,7 +10,9 @@ import {
   ArrowRight,
   ArrowLeft,
   Edit3,
-  CheckCircle2
+  CheckCircle2,
+  ChevronUp,
+  ChevronDown
 } from 'lucide-react';
 
 export default function InventoryAdjustPage() {
@@ -26,6 +28,12 @@ export default function InventoryAdjustPage() {
 
   const [selectedHistory, setSelectedHistory] = useState<any | null>(null);
   const [isEditMode, setIsEditMode] = useState(false);
+
+  // STATE SORTING
+  const [sortConfig, setSortConfig] = useState<{ key: string; direction: 'asc' | 'desc' | null }>({
+    key: 'name',
+    direction: 'asc',
+  });
 
   const API_URL = 'http://localhost:3000';
 
@@ -59,6 +67,62 @@ export default function InventoryAdjustPage() {
       setItems(data.map((item: any) => ({ ...item, newQty: '', newCost: item.lastBuyPrice || 0 })));
     } catch (err) { console.error(err); } finally { setLoading(false); }
   };
+
+  // LOGIKA SORTING LENGKAP
+  const handleSort = (key: string) => {
+    let direction: 'asc' | 'desc' = 'asc';
+    if (sortConfig.key === key && sortConfig.direction === 'asc') {
+      direction = 'desc';
+    }
+    setSortConfig({ key, direction });
+  };
+
+  const sortedItems = useMemo(() => {
+    const dataToSort = isEditMode && selectedHistory ? selectedHistory.items : items;
+    if (!sortConfig.key || !sortConfig.direction) return dataToSort;
+
+    return [...dataToSort].sort((a, b) => {
+      let aValue: any;
+      let bValue: any;
+
+      // Mapping untuk kolom-kolom khusus dan kalkulasi
+      switch (sortConfig.key) {
+        case 'itemGroup':
+          aValue = a.itemGroup?.name || '';
+          bValue = b.itemGroup?.name || '';
+          break;
+        case 'currentQty':
+          aValue = (a.initialQty || 0) + (a.incomingQty || 0);
+          bValue = (b.initialQty || 0) + (b.incomingQty || 0);
+          break;
+        case 'qtyDiff':
+          aValue = (Number(a.newQty) || 0) - ((a.initialQty || 0) + (a.incomingQty || 0));
+          bValue = (Number(b.newQty) || 0) - ((b.initialQty || 0) + (b.incomingQty || 0));
+          break;
+        case 'totalCost':
+          const aDiff = (Number(a.newQty) || 0) - ((a.initialQty || 0) + (a.incomingQty || 0));
+          const bDiff = (Number(b.newQty) || 0) - ((b.initialQty || 0) + (b.incomingQty || 0));
+          aValue = (aDiff > 0 ? aDiff : 0) * (a.newCost || 0);
+          bValue = (bDiff > 0 ? bDiff : 0) * (b.newCost || 0);
+          break;
+        case 'newQty':
+          aValue = Number(a.newQty) || 0;
+          bValue = Number(b.newQty) || 0;
+          break;
+        case 'newCost':
+          aValue = Number(a.newCost) || 0;
+          bValue = Number(b.newCost) || 0;
+          break;
+        default:
+          aValue = a[sortConfig.key];
+          bValue = b[sortConfig.key];
+      }
+
+      if (aValue < bValue) return sortConfig.direction === 'asc' ? -1 : 1;
+      if (aValue > bValue) return sortConfig.direction === 'asc' ? 1 : -1;
+      return 0;
+    });
+  }, [items, selectedHistory, isEditMode, sortConfig]);
 
   const handleViewDetail = async (headerId: string) => {
     setLoading(true);
@@ -134,22 +198,39 @@ export default function InventoryAdjustPage() {
     } catch (err) { alert("Gagal!"); } finally { setLoading(false); }
   };
 
+  const renderSortIcon = (key: string) => {
+    if (sortConfig.key !== key) return <div className="w-4" />;
+    return sortConfig.direction === 'asc' ? <ChevronUp size={14} className="ml-1 text-indigo-500" /> : <ChevronDown size={14} className="ml-1 text-indigo-500" />;
+  };
+
   const renderTable = (dataItems: any[], editEnabled: boolean) => (
     <div className="bg-white rounded-2xl border border-slate-200 overflow-hidden shadow-sm">
       <div className="overflow-x-auto">
         <table className="w-full text-left border-collapse text-xs">
           <thead>
-            <tr className="bg-slate-50 text-[10px] font-semibold text-slate-400 uppercase tracking-widest">
-              <th className="px-4 py-4 border-b">SKU</th>
-              <th className="px-4 py-4 border-b">Item Name</th>
-              <th className="px-4 py-4 border-b">Item Group</th>
-              <th className="px-4 py-4 border-b">Major</th>
-              <th className="px-4 py-4 border-b text-center">Current Qty</th>
-              <th className="px-4 py-4 border-b">UOM</th>
-              <th className="px-4 py-4 border-b text-center bg-indigo-50/30 text-indigo-600">New Qty</th>
-              <th className="px-4 py-4 border-b text-center">Qty Diff</th>
-              <th className="px-4 py-4 border-b text-center bg-emerald-50/30 text-emerald-600">New Cost</th>
-              <th className="px-4 py-4 border-b text-right">New Total Cost</th>
+            <tr className="bg-slate-50 text-[10px] font-semibold text-slate-400 uppercase tracking-widest select-none">
+              {[
+                { label: 'SKU', key: 'sku' },
+                { label: 'Item Name', key: 'name' },
+                { label: 'Item Group', key: 'itemGroup' },
+                { label: 'Major', key: 'majorGroup' },
+                { label: 'Current Qty', key: 'currentQty', align: 'center' },
+                { label: 'UOM', key: 'uom' },
+                { label: 'New Qty', key: 'newQty', align: 'center', className: 'bg-indigo-50/30 text-indigo-600' },
+                { label: 'Qty Diff', key: 'qtyDiff', align: 'center' },
+                { label: 'New Cost', key: 'newCost', align: 'center', className: 'bg-emerald-50/30 text-emerald-600' },
+                { label: 'New Total Cost', key: 'totalCost', align: 'right' }
+              ].map((col) => (
+                <th 
+                  key={col.key}
+                  className={`px-4 py-4 border-b cursor-pointer hover:bg-slate-100 transition-colors ${col.className || ''}`}
+                  onClick={() => handleSort(col.key)}
+                >
+                  <div className={`flex items-center ${col.align === 'center' ? 'justify-center' : col.align === 'right' ? 'justify-end' : ''}`}>
+                    {col.label} {renderSortIcon(col.key)}
+                  </div>
+                </th>
+              ))}
             </tr>
           </thead>
           <tbody className="divide-y divide-slate-50">
@@ -196,7 +277,6 @@ export default function InventoryAdjustPage() {
 
   return (
     <div className="p-8 pb-40 max-w-[1600px] mx-auto bg-slate-50 min-h-screen font-sans text-slate-600">
-      {/* HEADER */}
       <div className="flex flex-col md:flex-row md:items-center justify-between mb-10 gap-6">
         <div>
           <h1 className="text-2xl font-semibold text-slate-900 tracking-tight">Inventory Control</h1>
@@ -218,7 +298,7 @@ export default function InventoryAdjustPage() {
           </div>
           {items.length > 0 && (
             <div className="space-y-4 animate-in fade-in slide-in-from-bottom-4 duration-500">
-              {renderTable(items, true)}
+              {renderTable(sortedItems, true)}
               <div className="flex justify-end"><button onClick={handleSubmit} className="flex items-center gap-2 bg-indigo-600 text-white px-8 py-3 rounded-xl font-medium text-xs hover:bg-indigo-700 shadow-lg shadow-indigo-100"><Save size={16} /> SAVE ADJUSTMENT</button></div>
             </div>
           )}
@@ -273,7 +353,7 @@ export default function InventoryAdjustPage() {
                 <div><label className="text-[10px] font-bold text-slate-400 uppercase">Outlet</label><p className="text-sm font-semibold text-slate-700 mt-1">{selectedHistory.outlet?.name}</p></div>
                 <div><label className="text-[10px] font-bold text-slate-400 uppercase">Category</label><p className="text-sm font-semibold text-slate-700 mt-1">{selectedHistory.majorGroup}</p></div>
               </div>
-              {renderTable(selectedHistory.items, isEditMode)}
+              {renderTable(sortedItems, isEditMode)}
             </div>
           )}
         </div>
