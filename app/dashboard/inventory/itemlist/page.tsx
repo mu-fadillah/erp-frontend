@@ -5,7 +5,7 @@ import React, { useState, useEffect, useRef } from 'react';
 import { 
   Search, Plus, Edit2, Trash2, X, LayoutGrid, Check, 
   ChevronDown, ChevronUp, Download, FileText, Table as TableIcon,
-  FileUp, AlertCircle, Loader2, FileSpreadsheet
+  FileUp, AlertCircle, Loader2, FileSpreadsheet, RefreshCw
 } from 'lucide-react';
 
 // Import Library
@@ -29,11 +29,15 @@ export default function InventoryPage() {
   const [showModal, setShowModal] = useState(false);
   const [isEdit, setIsEdit] = useState(false);
   const [selectedId, setSelectedId] = useState<string | null>(null);
+  
+  // PERBAIKAN: Tambahkan recipeUom dan conversionRate ke formData
   const [formData, setFormData] = useState({ 
     name: '', 
     itemGroupId: '', 
     uom: 'PCS', 
-    buyPrice: '' 
+    buyPrice: '',
+    recipeUom: '',      // New
+    conversionRate: '1' // New (as string for input handling)
   });
 
   // Group Edit States
@@ -72,39 +76,34 @@ export default function InventoryPage() {
     }
   };
 
-  // --- LOGIKA AUTO CODING (C00xxxx) ---
   const generateNextSKU = (lastSKU: string | null) => {
     const prefix = "C00";
     if (!lastSKU || !lastSKU.startsWith(prefix)) return `${prefix}0001`;
-    
     const lastNumber = parseInt(lastSKU.replace(prefix, ''));
     const nextNumber = lastNumber + 1;
     return `${prefix}${nextNumber.toString().padStart(4, '0')}`;
   };
 
-  // --- LOGIKA DOWNLOAD TEMPLATE ---
+  // --- LOGIKA DOWNLOAD TEMPLATE (Updated) ---
   const handleDownloadTemplate = () => {
     const templateData = [
       {
-        'Nama Item': 'COLA',
-        'Group': 'BEVERAGES',
-        'Harga': 0,
-        'Satuan': 'PCS',
-        'Stok Awal': 0
+        'Nama Item': 'JAGERMEISTER 700ML',
+        'Group': 'LIQUOR',
+        'Harga': 500000,
+        'Satuan': 'BTL',
+        'Stok Awal': 10,
+        'Satuan Resep': 'ML',
+        'Isi per Satuan': 700
       }
     ];
-    
     const worksheet = XLSX.utils.json_to_sheet(templateData);
     const workbook = XLSX.utils.book_new();
     XLSX.utils.book_append_sheet(workbook, worksheet, "Template_Import");
-    
-    // Set column widths
-    worksheet['!cols'] = [{ wch: 30 }, { wch: 15 }, { wch: 10 }, { wch: 10 }, { wch: 10 }];
-    
     XLSX.writeFile(workbook, "Template_Import_Inventory.xlsx");
   };
 
-  // --- LOGIKA IMPORT EXCEL ---
+  // --- LOGIKA IMPORT EXCEL (Updated) ---
   const handleImportExcel = (e: React.ChangeEvent<HTMLInputElement>) => {
     const file = e.target.files?.[0];
     if (!file) return;
@@ -126,7 +125,6 @@ export default function InventoryPage() {
         const formattedPayload = data.map((row: any) => {
           const newSKU = generateNextSKU(currentLastSKU);
           currentLastSKU = newSKU;
-
           const group = itemGroups.find(g => g.name.toLowerCase() === (row['Group'] || '').toLowerCase());
 
           return {
@@ -135,7 +133,9 @@ export default function InventoryPage() {
             itemGroupId: group?.id || itemGroups[0]?.id,
             buyPrice: Number(row['Harga']) || 0,
             uom: row['Satuan'] || 'PCS',
-            qty: Number(row['Stok Awal']) || 0
+            qty: Number(row['Stok Awal']) || 0,
+            recipeUom: row['Satuan Resep'] || '',
+            conversionRate: Number(row['Isi per Satuan']) || 1
           };
         });
 
@@ -150,7 +150,7 @@ export default function InventoryPage() {
           fetchData();
         }
       } catch (err) {
-        alert("Gagal memproses file. Pastikan header sesuai template.");
+        alert("Gagal memproses file.");
       } finally {
         if (fileInputRef.current) fileInputRef.current.value = '';
       }
@@ -158,7 +158,6 @@ export default function InventoryPage() {
     reader.readAsBinaryString(file);
   };
 
-  // --- LOGIKA EXPORT ---
   const getExportData = () => {
     return filteredProducts.map(p => ({
       'Kode Item': p.sku,
@@ -167,7 +166,9 @@ export default function InventoryPage() {
       'Major Group': p.majorGroup,
       'Harga': p.buyPrice,
       'Stok': p.qty,
-      'UOM': p.uom
+      'UOM': p.uom,
+      'Recipe UOM': p.recipeUom || '-',
+      'Conv Rate': p.conversionRate
     }));
   };
 
@@ -183,14 +184,14 @@ export default function InventoryPage() {
   const handleExportPDF = () => {
     const doc = new jsPDF('l', 'mm', 'a4');
     const data = getExportData();
-    const headers = [['Kode Item', 'Nama Item', 'Item Group', 'Major Group', 'Harga', 'Stok', 'UOM']];
+    const headers = [['Kode', 'Nama Item', 'Group', 'Major', 'Harga', 'Stok', 'UOM', 'Recipe UOM', 'Rate']];
     const body = data.map(item => Object.values(item));
     autoTable(doc, {
       head: headers,
       body: body,
       startY: 30,
       theme: 'grid',
-      headStyles: { fillColor: [79, 70, 229], textColor: [255, 255, 255] },
+      headStyles: { fillColor: [79, 70, 229] },
     });
     doc.save(`Inventory_Report_${new Date().getTime()}.pdf`);
     setShowExportMenu(false);
@@ -219,10 +220,17 @@ export default function InventoryPage() {
     try {
       const url = isEdit ? `http://localhost:3000/product/${selectedId}` : 'http://localhost:3000/product';
       const method = isEdit ? 'PATCH' : 'POST';
-      
+
+      const finalRecipeUom = formData.recipeUom.trim() === '' ? formData.uom : formData.recipeUom;
+      const finalConversionRate = !formData.conversionRate || Number(formData.conversionRate) === 0 
+                                  ? 1 
+                                  : Number(formData.conversionRate);
+
       const finalPayload = { 
         ...formData, 
         buyPrice: Number(formData.buyPrice),
+        recipeUom: finalRecipeUom,
+        conversionRate: finalConversionRate,
         ...( !isEdit && { sku: generateNextSKU(products.length > 0 ? products[0].sku : null) } )
       };
 
@@ -231,9 +239,18 @@ export default function InventoryPage() {
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify(finalPayload),
       });
+
       if (res.ok) {
         setShowModal(false);
-        setFormData({ name: '', itemGroupId: '', uom: 'PCS', buyPrice: '' }); 
+        // Reset form ke default
+        setFormData({ 
+          name: '', 
+          itemGroupId: '', 
+          uom: 'PCS', 
+          buyPrice: '', 
+          recipeUom: '', 
+          conversionRate: '1' 
+        }); 
         fetchData();
       }
     } catch (error) {
@@ -256,8 +273,8 @@ export default function InventoryPage() {
       <section className="space-y-8">
         <div className="flex flex-col md:flex-row md:items-end justify-between gap-6">
           <div className="space-y-1">
-            <h1 className="text-3xl font-semibold text-slate-900 tracking-tight">Inventory</h1>
-            <p className="text-slate-500 text-sm font-medium">Manajemen stok barang dan import data standar.</p>
+            <h1 className="text-3xl font-semibold text-slate-900 tracking-tight">Inventory List</h1>
+            <p className="text-slate-500 text-sm font-medium">Manajemen stok barang dan konversi satuan resep.</p>
           </div>
           
           <div className="flex gap-3 relative">
@@ -287,7 +304,11 @@ export default function InventoryPage() {
             </div>
 
             <button 
-              onClick={() => { setIsEdit(false); setFormData({name:'', itemGroupId:'', uom:'PCS', buyPrice: ''}); setShowModal(true); }}
+              onClick={() => { 
+                setIsEdit(false); 
+                setFormData({name:'', itemGroupId:'', uom:'PCS', buyPrice: '', recipeUom: '', conversionRate: '1'}); 
+                setShowModal(true); 
+              }}
               className="bg-indigo-600 hover:bg-indigo-700 text-white px-5 py-2.5 rounded-xl font-medium flex items-center gap-2 transition-all shadow-sm active:scale-95"
             >
               <Plus size={18} /> Tambah Item
@@ -295,18 +316,18 @@ export default function InventoryPage() {
           </div>
         </div>
 
-        {/* Info Box & Template Download */}
+        {/* Info Box */}
         <div className="bg-indigo-50/50 border border-indigo-100 p-5 rounded-3xl flex flex-col md:flex-row md:items-center justify-between gap-4">
-           <div className="flex items-center gap-4 text-xs font-medium text-indigo-700">
-             <AlertCircle size={20} className="text-indigo-400" />
-             <p>Gunakan format excel yang benar untuk import data masal. Kode item akan otomatis melanjutkan urutan terakhir.</p>
-           </div>
-           <button 
-             onClick={handleDownloadTemplate}
-             className="flex items-center gap-2 bg-indigo-100 text-indigo-700 px-4 py-2 rounded-xl text-xs font-bold hover:bg-indigo-200 transition-colors"
-           >
-             <FileSpreadsheet size={16} /> DOWNLOAD TEMPLATE
-           </button>
+            <div className="flex items-center gap-4 text-xs font-medium text-indigo-700">
+              <AlertCircle size={20} className="text-indigo-400" />
+              <p>Atur <b>Satuan Resep</b> dan <b>Isi per Satuan</b> untuk kalkulasi pemakaian bahan di Menu Jual secara otomatis.</p>
+            </div>
+            <button 
+              onClick={handleDownloadTemplate}
+              className="flex items-center gap-2 bg-indigo-100 text-indigo-700 px-4 py-2 rounded-xl text-xs font-bold hover:bg-indigo-200 transition-colors"
+            >
+              <FileSpreadsheet size={16} /> DOWNLOAD TEMPLATE
+            </button>
         </div>
 
         {/* Filter Bar */}
@@ -351,9 +372,10 @@ export default function InventoryPage() {
                     <th className="px-6 py-3.5 text-xs font-semibold text-slate-500 uppercase tracking-wider">Kode</th>
                     <th className="px-6 py-3.5 text-xs font-semibold text-slate-500 uppercase tracking-wider">Nama Item</th>
                     <th className="px-6 py-3.5 text-xs font-semibold text-slate-500 uppercase tracking-wider">Group</th>
-                    <th className="px-6 py-3.5 text-xs font-semibold text-slate-500 uppercase tracking-wider text-center">Major</th>
                     <th className="px-6 py-3.5 text-xs font-semibold text-slate-500 uppercase tracking-wider text-right">Harga</th>
                     <th className="px-6 py-3.5 text-xs font-semibold text-slate-500 uppercase tracking-wider text-right">Stok</th>
+                    {/* NEW COLUMNS */}
+                    <th className="px-6 py-3.5 text-xs font-semibold text-indigo-500 uppercase tracking-wider text-center bg-indigo-50/30">Ratio Resep</th>
                     <th className="px-6 py-3.5 text-xs font-semibold text-slate-500 uppercase tracking-wider text-center">Aksi</th>
                   </tr>
                 </thead>
@@ -366,21 +388,42 @@ export default function InventoryPage() {
                     <tr key={p.id} className="group hover:bg-slate-50/80 transition-colors">
                       <td className="px-6 py-4 text-xs font-bold text-indigo-600 font-mono tracking-tighter">{p.sku}</td>
                       <td className="px-6 py-4 text-sm font-medium text-slate-800">{p.name}</td>
-                      <td className="px-6 py-4 text-[11px] font-medium text-slate-500">{p.itemGroup?.name || '-'}</td>
-                      <td className="px-6 py-4 text-center">
-                        <span className={`px-2 py-0.5 rounded-md text-[10px] font-medium ${
-                            p.majorGroup === 'BAR' ? 'bg-purple-50 text-purple-600' :
-                            p.majorGroup === 'KITCHEN' ? 'bg-blue-50 text-blue-600' : 'bg-slate-100 text-slate-600'
-                          }`}>{p.majorGroup}</span>
+                      <td className="px-6 py-4 text-[11px] font-medium text-slate-500">
+                        {p.itemGroup?.name || '-'} 
+                        <span className="ml-2 px-1.5 py-0.5 bg-slate-100 rounded text-[9px]">{p.majorGroup}</span>
                       </td>
                       <td className="px-6 py-4 text-right text-sm font-medium text-slate-600">{formatCurrency(p.buyPrice || 0)}</td>
                       <td className="px-6 py-4 text-right">
                         <span className="text-sm font-semibold text-slate-900">{p.qty}</span>
                         <span className="ml-1 text-[10px] font-medium text-slate-400 uppercase">{p.uom}</span>
                       </td>
+                      {/* NEW DATA CELL */}
+                      <td className="px-6 py-4 text-center bg-indigo-50/10">
+                        <div className="flex flex-col items-center">
+                          <span className="text-xs font-bold text-indigo-600">1 {p.uom} = {p.conversionRate} {p.recipeUom || '?'}</span>
+                          <span className="text-[9px] text-slate-400 italic">Konversi Resep</span>
+                        </div>
+                      </td>
                       <td className="px-6 py-4">
                         <div className="flex justify-center gap-1 opacity-0 group-hover:opacity-100 transition-opacity">
-                          <button onClick={() => { setIsEdit(true); setSelectedId(p.id); setFormData({ name: p.name, itemGroupId: p.itemGroupId, uom: p.uom, buyPrice: p.buyPrice === 0 ? '' : String(p.buyPrice) }); setShowModal(true); }} className="p-1.5 text-slate-400 hover:text-indigo-600 hover:bg-indigo-50 rounded-lg transition-all"><Edit2 size={15}/></button>
+                          <button 
+                            onClick={() => { 
+                              setIsEdit(true); 
+                              setSelectedId(p.id); 
+                              setFormData({ 
+                                name: p.name, 
+                                itemGroupId: p.itemGroupId, 
+                                uom: p.uom, 
+                                buyPrice: p.buyPrice === 0 ? '' : String(p.buyPrice),
+                                recipeUom: p.recipeUom || '',
+                                conversionRate: String(p.conversionRate || 1)
+                              }); 
+                              setShowModal(true); 
+                            }} 
+                            className="p-1.5 text-slate-400 hover:text-indigo-600 hover:bg-indigo-50 rounded-lg transition-all"
+                          >
+                            <Edit2 size={15}/>
+                          </button>
                           <button onClick={async () => { if(confirm('Hapus item?')) { await fetch(`http://localhost:3000/product/${p.id}`, {method:'DELETE'}); fetchData(); } }} className="p-1.5 text-slate-400 hover:text-red-600 hover:bg-red-50 rounded-lg transition-all"><Trash2 size={15}/></button>
                         </div>
                       </td>
@@ -393,7 +436,90 @@ export default function InventoryPage() {
         </div>
       </section>
 
-      {/* SECTION 2: ITEM GROUP MANAGEMENT */}
+      {/* MODAL TAMBAH/EDIT (Updated with Recipe Conversion Fields) */}
+      {showModal && (
+        <div className="fixed inset-0 bg-slate-900/40 backdrop-blur-[2px] flex items-center justify-center z-[200] p-4">
+          <div className="bg-white rounded-3xl w-full max-w-md shadow-2xl overflow-hidden animate-in zoom-in-95 duration-200">
+            <div className="px-8 pt-8 pb-4 border-b border-slate-50">
+              <h2 className="text-xl font-semibold text-slate-900">{isEdit ? 'Ubah Item' : 'Item Baru'}</h2>
+              <p className="text-slate-500 text-xs mt-1">Lengkapi detail produk dan satuan konversi resep.</p>
+            </div>
+            <form onSubmit={handleSaveProduct} className="p-8 space-y-5">
+              <div className="space-y-1.5">
+                <label className="text-xs font-semibold text-slate-500 uppercase ml-1 tracking-wide">Nama Produk</label>
+                <input required className="w-full bg-slate-50 border border-slate-200 rounded-xl px-4 py-3 text-sm font-medium outline-none focus:ring-2 focus:ring-indigo-500/20 focus:bg-white transition-all" value={formData.name} onChange={e => setFormData({...formData, name: e.target.value})} />
+              </div>
+
+              <div className="grid grid-cols-2 gap-4">
+                <div className="space-y-1.5">
+                  <label className="text-xs font-semibold text-slate-500 uppercase ml-1 tracking-wide">Kategori</label>
+                  <select required className="w-full bg-slate-50 border border-slate-200 rounded-xl px-3 py-3 text-sm font-medium outline-none cursor-pointer" value={formData.itemGroupId} onChange={e => setFormData({...formData, itemGroupId: e.target.value})}>
+                    <option value="">Pilih...</option>
+                    {itemGroups.map(g => <option key={g.id} value={g.id}>{g.name}</option>)}
+                  </select>
+                </div>
+                <div className="space-y-1.5">
+                  <label className="text-xs font-semibold text-slate-500 uppercase ml-1 tracking-wide">Satuan Stok</label>
+                  <select required className="w-full bg-slate-50 border border-slate-200 rounded-xl px-3 py-3 text-sm font-medium outline-none cursor-pointer" value={formData.uom} onChange={e => setFormData({...formData, uom: e.target.value})}>
+                    {['BTL', 'KG', 'GR', 'LTR', 'ML', 'PACK', 'PCS', 'BOX', 'CAN'].map(u => <option key={u} value={u}>{u}</option>)}
+                  </select>
+                </div>
+              </div>
+
+              <div className="space-y-1.5">
+                <label className="text-xs font-semibold text-slate-500 uppercase ml-1 tracking-wide">Harga Beli Standar</label>
+                <div className="relative">
+                  <span className="absolute left-4 top-1/2 -translate-y-1/2 text-sm font-medium text-slate-400 font-mono tracking-tighter">Rp</span>
+                  <input type="text" className="w-full bg-slate-50 border border-slate-200 rounded-xl pl-10 pr-4 py-3 text-sm font-mono font-medium outline-none focus:ring-2 focus:ring-indigo-500/20 focus:bg-white transition-all" value={formatNumberWithDot(formData.buyPrice)} onChange={handlePriceChange} placeholder="0" />
+                </div>
+              </div>
+
+              {/* --- NEW SECTION: RECIPE CONVERSION --- */}
+              <div className="p-4 bg-indigo-50/50 rounded-2xl border border-indigo-100 space-y-4">
+                <div className="flex items-center gap-2 mb-1">
+                    <RefreshCw size={14} className="text-indigo-500" />
+                    <span className="text-[10px] font-bold text-indigo-600 uppercase tracking-widest">Konversi Resep</span>
+                </div>
+                
+                <div className="grid grid-cols-2 gap-4">
+                    <div className="space-y-1.5">
+                        <label className="text-[10px] font-bold text-slate-400 uppercase ml-1">Unit Resep</label>
+                        <input 
+                          placeholder="ml / gr" 
+                          className="w-full bg-white border border-slate-200 rounded-xl px-3 py-2 text-sm outline-none focus:ring-2 focus:ring-indigo-500/20" 
+                          value={formData.recipeUom} 
+                          onChange={e => setFormData({...formData, recipeUom: e.target.value.toUpperCase()})} 
+                        />
+                    </div>
+                    <div className="space-y-1.5">
+                        <label className="text-[10px] font-bold text-slate-400 uppercase ml-1">Isi per {formData.uom}</label>
+                        <input 
+                          type="number"
+                          placeholder="700" 
+                          className="w-full bg-white border border-slate-200 rounded-xl px-3 py-2 text-sm outline-none focus:ring-2 focus:ring-indigo-500/20" 
+                          value={formData.conversionRate} 
+                          onChange={e => setFormData({...formData, conversionRate: e.target.value})} 
+                        />
+                    </div>
+                </div>
+                <p className="text-[9px] text-slate-500 italic px-1">
+                    Contoh: 1 {formData.uom || 'Unit'} isi {formData.conversionRate || '...'} {formData.recipeUom || '...'}
+                    *Kosongkan jika satuan resep sama dengan satuan stok (1 {formData.uom} = 1 {formData.uom})
+                </p>
+              </div>
+
+              <div className="flex gap-3 pt-4">
+                <button type="button" onClick={() => setShowModal(false)} className="flex-1 py-3 text-sm font-semibold text-slate-500 hover:bg-slate-50 rounded-xl transition-colors">Batal</button>
+                <button type="submit" disabled={isSubmitting} className="flex-1 bg-indigo-600 hover:bg-indigo-700 text-white py-3 rounded-xl text-sm font-semibold shadow-indigo-100 shadow-lg transition-all disabled:opacity-50 flex items-center justify-center gap-2">
+                  {isSubmitting ? <Loader2 className="animate-spin" size={18} /> : 'Simpan Item'}
+                </button>
+              </div>
+            </form>
+          </div>
+        </div>
+      )}
+
+      {/* SECTION 2: ITEM GROUP MANAGEMENT (Unchanged) */}
       <section className="pt-8 border-t border-slate-100">
         <div className="flex items-center gap-3 mb-8">
           <div className="w-10 h-10 bg-indigo-50 text-indigo-600 rounded-xl flex items-center justify-center"><LayoutGrid size={20} /></div>
@@ -401,6 +527,7 @@ export default function InventoryPage() {
         </div>
         
         <div className="grid grid-cols-1 lg:grid-cols-12 gap-8">
+          {/* Form Add Group */}
           <div className="lg:col-span-4 bg-slate-50/50 p-6 rounded-2xl border border-slate-200/60 h-fit">
             <h3 className="text-xs font-semibold text-slate-400 uppercase tracking-wider mb-5">Tambah Group</h3>
             <form onSubmit={async (e: any) => {
@@ -422,6 +549,7 @@ export default function InventoryPage() {
             </form>
           </div>
 
+          {/* Group Chips List */}
           <div className="lg:col-span-8 flex flex-wrap gap-3">
             {itemGroups.map((g) => (
               <div key={g.id} className={`group flex items-center gap-4 border px-4 py-2.5 rounded-xl transition-all ${editingGroupId === g.id ? 'border-indigo-400 bg-indigo-50/30' : 'bg-white border-slate-200 hover:border-slate-300 shadow-sm'}`}>
@@ -448,52 +576,6 @@ export default function InventoryPage() {
           </div>
         </div>
       </section>
-
-      {/* MODAL TAMBAH/EDIT */}
-      {showModal && (
-        <div className="fixed inset-0 bg-slate-900/40 backdrop-blur-[2px] flex items-center justify-center z-[200] p-4">
-          <div className="bg-white rounded-3xl w-full max-w-md shadow-2xl overflow-hidden animate-in zoom-in-95 duration-200">
-            <div className="px-8 pt-8 pb-4">
-              <h2 className="text-xl font-semibold text-slate-900">{isEdit ? 'Ubah Item' : 'Item Baru'}</h2>
-              <p className="text-slate-500 text-xs mt-1">Gunakan kode otomatis C00xxxx atau edit detail.</p>
-            </div>
-            <form onSubmit={handleSaveProduct} className="p-8 space-y-5">
-              <div className="space-y-1.5">
-                <label className="text-xs font-semibold text-slate-500 uppercase ml-1 tracking-wide">Nama Produk</label>
-                <input required className="w-full bg-slate-50 border border-slate-200 rounded-xl px-4 py-3 text-sm font-medium outline-none focus:ring-2 focus:ring-indigo-500/20 focus:bg-white transition-all" value={formData.name} onChange={e => setFormData({...formData, name: e.target.value})} />
-              </div>
-              <div className="space-y-1.5">
-                <label className="text-xs font-semibold text-slate-500 uppercase ml-1 tracking-wide">Harga Satuan</label>
-                <div className="relative">
-                  <span className="absolute left-4 top-1/2 -translate-y-1/2 text-sm font-medium text-slate-400 font-mono tracking-tighter">Rp</span>
-                  <input type="text" className="w-full bg-slate-50 border border-slate-200 rounded-xl pl-10 pr-4 py-3 text-sm font-mono font-medium outline-none focus:ring-2 focus:ring-indigo-500/20 focus:bg-white transition-all" value={formatNumberWithDot(formData.buyPrice)} onChange={handlePriceChange} placeholder="0" />
-                </div>
-              </div>
-              <div className="grid grid-cols-2 gap-4">
-                <div className="space-y-1.5">
-                  <label className="text-xs font-semibold text-slate-500 uppercase ml-1 tracking-wide">Kategori</label>
-                  <select required className="w-full bg-slate-50 border border-slate-200 rounded-xl px-3 py-3 text-sm font-medium outline-none cursor-pointer" value={formData.itemGroupId} onChange={e => setFormData({...formData, itemGroupId: e.target.value})}>
-                    <option value="">Pilih...</option>
-                    {itemGroups.map(g => <option key={g.id} value={g.id}>{g.name}</option>)}
-                  </select>
-                </div>
-                <div className="space-y-1.5">
-                  <label className="text-xs font-semibold text-slate-500 uppercase ml-1 tracking-wide">Satuan</label>
-                  <select required className="w-full bg-slate-50 border border-slate-200 rounded-xl px-3 py-3 text-sm font-medium outline-none cursor-pointer" value={formData.uom} onChange={e => setFormData({...formData, uom: e.target.value})}>
-                    {['BTL', 'KG', 'GR', 'LTR', 'ML', 'PACK', 'PCS'].map(u => <option key={u} value={u}>{u}</option>)}
-                  </select>
-                </div>
-              </div>
-              <div className="flex gap-3 pt-6">
-                <button type="button" onClick={() => setShowModal(false)} className="flex-1 py-3 text-sm font-semibold text-slate-500 hover:bg-slate-50 rounded-xl transition-colors">Batal</button>
-                <button type="submit" disabled={isSubmitting} className="flex-1 bg-indigo-600 hover:bg-indigo-700 text-white py-3 rounded-xl text-sm font-semibold shadow-indigo-100 shadow-lg transition-all disabled:opacity-50">
-                  {isSubmitting ? 'Menyimpan...' : 'Simpan Item'}
-                </button>
-              </div>
-            </form>
-          </div>
-        </div>
-      )}
     </div>
   );
 }

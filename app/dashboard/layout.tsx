@@ -65,6 +65,7 @@ export default function DashboardLayout({ children }: { children: React.ReactNod
       items: [
         { name: 'Item List', path: '/dashboard/inventory/itemlist', icon: <Package size={18} /> },
         { name: 'Inventory Adjustment', path: '/dashboard/inventory/adjust', icon: <History size={18} />, },
+        { name: 'Menu List', path: '/dashboard/inventory/recipe', icon: <Package size={18} /> },
       ]
     },
     {
