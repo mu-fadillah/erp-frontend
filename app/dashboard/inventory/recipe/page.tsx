@@ -1,10 +1,11 @@
 /* eslint-disable @typescript-eslint/no-explicit-any */
 'use client';
 
-import React, { useState, useEffect, useMemo } from 'react';
+import React, { useState, useEffect, useMemo, useCallback } from 'react';
 import { 
   Search, Plus, Edit2, Trash2, Save, ChefHat, Loader2, 
-  Package, Layers, X, Settings2, ChevronDown, ChevronUp
+  Package, Layers, X, Settings2, ChevronDown, ChevronUp,
+  AlertCircle, RefreshCw, CheckCircle2, LayoutGrid
 } from 'lucide-react';
 
 export default function RecipePage() {
@@ -22,8 +23,15 @@ export default function RecipePage() {
   const [searchTerm, setSearchTerm] = useState('');
   const [ingredientSearch, setIngredientSearch] = useState('');
 
-  // State untuk expand baris resep di tabel
+  // UI States (Patokan dari Itemlist)
+  const [isTableExpanded, setIsTableExpanded] = useState(true);
   const [expandedIds, setExpandedIds] = useState<string[]>([]);
+  const [notification, setNotification] = useState<{message: string, type: 'success' | 'error'} | null>(null);
+
+  // State Setup Groups
+  const [newMajorName, setNewMajorName] = useState('');
+  const [newMenuGroupName, setNewMenuGroupName] = useState('');
+  const [selectedMajorForGroup, setSelectedMajorForGroup] = useState('');
 
   const [formData, setFormData] = useState({
     sku: '', name: '', majorGroupId: '', menuGroupId: '',
@@ -31,9 +39,12 @@ export default function RecipePage() {
   });
   const [recipeItems, setRecipeItems] = useState<any[]>([]);
 
-  useEffect(() => { fetchData(); }, []);
+  const showNotif = (message: string, type: 'success' | 'error' = 'success') => {
+    setNotification({ message, type });
+    setTimeout(() => setNotification(null), 3000);
+  };
 
-  const fetchData = async () => {
+  const fetchData = useCallback(async () => {
     try {
       setLoading(true);
       const [menuRes, prodRes, majorRes, groupRes] = await Promise.all([
@@ -47,6 +58,53 @@ export default function RecipePage() {
       setMajorGroups(await majorRes.json());
       setMenuGroups(await groupRes.json());
     } catch (err) { console.error(err); } finally { setLoading(false); }
+  }, []);
+
+  useEffect(() => { fetchData(); }, [fetchData]);
+
+  // --- LOGIKA SETUP GROUPS ---
+  const handleAddMajorGroup = async () => {
+    if (!newMajorName) return;
+    try {
+      const res = await fetch('http://localhost:3000/menu/major-group', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ name: newMajorName })
+      });
+      if (res.ok) {
+        setNewMajorName('');
+        showNotif("Major Group berhasil ditambah");
+        fetchData();
+      }
+    } catch (error) { showNotif("Gagal menambah group", "error"); }
+  };
+
+  const handleAddMenuGroup = async () => {
+    if (!newMenuGroupName || !selectedMajorForGroup) return;
+    try {
+      const res = await fetch('http://localhost:3000/menu/menu-group', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ name: newMenuGroupName, majorGroupId: selectedMajorForGroup })
+      });
+      if (res.ok) {
+        setNewMenuGroupName('');
+        showNotif("Menu Group berhasil ditambah");
+        fetchData();
+      }
+    } catch (error) { showNotif("Gagal menambah group", "error"); }
+  };
+
+  const handleDeleteGroup = async (type: 'major' | 'menu', id: string) => {
+    if (!confirm(`Hapus ${type} group ini?`)) return;
+    try {
+      const endpoint = type === 'major' ? 'major-group' : 'menu-group';
+      const res = await fetch(`http://localhost:3000/menu/${endpoint}/${id}`, { method: 'DELETE' });
+      if (res.ok) {
+        showNotif("Group berhasil dihapus");
+        fetchData();
+      }
+    } catch (error) { showNotif("Gagal menghapus", "error"); }
   };
 
   const toggleExpand = (id: string) => {
@@ -59,56 +117,17 @@ export default function RecipePage() {
     setIsEdit(true);
     setCurrentId(menu.id);
     setFormData({
-      sku: menu.sku,
-      name: menu.name,
-      majorGroupId: menu.majorGroupId,
-      menuGroupId: menu.menuGroupId,
-      type: menu.type,
-      uom: menu.uom,
-      qFactor: menu.qFactor,
-      yieldQty: menu.yieldQty
+      sku: menu.sku, name: menu.name, majorGroupId: menu.majorGroupId,
+      menuGroupId: menu.menuGroupId, type: menu.type, uom: menu.uom,
+      qFactor: menu.qFactor, yieldQty: menu.yieldQty
     });
-    
-    const items = menu.recipeItems.map((ri: any) => {
-      const buyPrice = Number(ri.ingredient?.buyPrice || 0);
-      const conv = Number(ri.ingredient?.conversionRate || 1);
-      return {
-        ingredientId: ri.ingredientId,
-        name: ri.ingredient?.name,
-        quantity: ri.quantity,
-        uom: ri.uom,
-        buyPrice: buyPrice,
-        conversionRate: conv,
-        cost: (buyPrice / conv) * ri.quantity
-      };
-    });
-    setRecipeItems(items);
+    setRecipeItems(menu.recipeItems.map((ri: any) => ({
+      ingredientId: ri.ingredientId, name: ri.ingredient?.name, quantity: ri.quantity,
+      uom: ri.uom, buyPrice: Number(ri.ingredient?.buyPrice || 0),
+      conversionRate: Number(ri.ingredient?.conversionRate || 1),
+      cost: (Number(ri.ingredient?.buyPrice || 0) / (Number(ri.ingredient?.conversionRate || 1))) * ri.quantity
+    })));
     setShowModal(true);
-  };
-
-  const handleDelete = async (id: string) => {
-    if (!confirm('Hapus resep ini?')) return;
-    try {
-      const res = await fetch(`http://localhost:3000/menu/${id}`, { method: 'DELETE' });
-      if (res.ok) fetchData();
-    } catch (error) { console.error(error); }
-  };
-
-  const addIngredient = (p: any) => {
-    if (recipeItems.find(item => item.ingredientId === p.id)) return;
-    setRecipeItems([...recipeItems, {
-      ingredientId: p.id, name: p.name, quantity: 1,
-      uom: p.recipeUom || p.uom, buyPrice: Number(p.buyPrice),
-      conversionRate: Number(p.conversionRate) || 1,
-      cost: Number(p.buyPrice) / (Number(p.conversionRate) || 1)
-    }]);
-  };
-
-  const updateItemQty = (index: number, qty: number) => {
-    const updated = [...recipeItems];
-    updated[index].quantity = qty;
-    updated[index].cost = (updated[index].buyPrice / updated[index].conversionRate) * qty;
-    setRecipeItems(updated);
   };
 
   const handleSave = async (e: React.FormEvent) => {
@@ -118,9 +137,35 @@ export default function RecipePage() {
       const payload = { ...formData, recipeItems: recipeItems.map(it => ({ ingredientId: it.ingredientId, quantity: Number(it.quantity), uom: it.uom })) };
       const url = isEdit ? `http://localhost:3000/menu/${currentId}` : 'http://localhost:3000/menu';
       const res = await fetch(url, { method: isEdit ? 'PATCH' : 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(payload) });
-      if (res.ok) { setShowModal(false); fetchData(); }
-    } catch (error) { console.error(error); } finally { setIsSubmitting(false); }
+      if (res.ok) { 
+        showNotif(isEdit ? "Resep diperbarui" : "Resep berhasil disimpan");
+        setShowModal(false); 
+        fetchData(); 
+      }
+    } catch (error) { showNotif("Terjadi kesalahan", "error"); } finally { setIsSubmitting(false); }
   };
+
+  // Fungsi untuk Menambah Bahan ke Resep
+const handleAddIngredient = (p: any) => {
+  if (recipeItems.find(item => item.ingredientId === p.id)) return;
+  setRecipeItems([...recipeItems, {
+    ingredientId: p.id, 
+    name: p.name, 
+    quantity: 1, 
+    uom: p.recipeUom || p.uom, 
+    buyPrice: Number(p.buyPrice), 
+    conversionRate: Number(p.conversionRate) || 1,
+    cost: Number(p.buyPrice) / (Number(p.conversionRate) || 1)
+  }]);
+};
+
+// Fungsi untuk Mengubah Quantity Bahan
+const handleUpdateItemQty = (index: number, qty: number) => {
+  const updated = [...recipeItems];
+  updated[index].quantity = qty;
+  updated[index].cost = (updated[index].buyPrice / updated[index].conversionRate) * qty;
+  setRecipeItems(updated);
+};
 
   const subtotalIngredients = recipeItems.reduce((sum, item) => sum + item.cost, 0);
   const finalHpp = subtotalIngredients + (subtotalIngredients * (formData.qFactor || 0) / 100);
@@ -130,229 +175,329 @@ export default function RecipePage() {
   }, [products, ingredientSearch]);
 
   return (
-    <div className="max-w-6xl mx-auto space-y-6 pb-10 px-4 text-slate-700">
-      {/* Header */}
-      <div className="flex justify-between items-center bg-white p-5 rounded-2xl border border-slate-100 shadow-sm text-sm">
-        <div>
-          <h1 className="text-xl font-bold text-slate-900">Recipe Master</h1>
-          <p className="text-slate-500 text-xs">Kelola bahan baku dan kalkulasi HPP otomatis.</p>
+    <div className="max-w-7xl mx-auto space-y-12 pb-20 px-4 sm:px-6 text-slate-700 relative">
+      
+      {/* Notifications (Patokan dari Itemlist style) */}
+      {notification && (
+        <div className={`fixed top-10 right-10 z-[300] flex items-center gap-3 px-6 py-4 rounded-2xl shadow-2xl border animate-in slide-in-from-right duration-300 ${notification.type === 'success' ? 'bg-emerald-50 border-emerald-100 text-emerald-800' : 'bg-red-50 border-red-100 text-red-800'}`}>
+          {notification.type === 'success' ? <CheckCircle2 className="text-emerald-500" size={20}/> : <AlertCircle className="text-red-500" size={20}/>}
+          <p className="text-sm font-bold">{notification.message}</p>
         </div>
-        <button onClick={() => { setIsEdit(false); setRecipeItems([]); setShowModal(true); }} className="bg-indigo-600 text-white px-5 py-2 rounded-xl font-semibold flex items-center gap-2 hover:bg-indigo-700 transition-all text-sm">
-          <Plus size={16}/> Menu Baru
-        </button>
-      </div>
+      )}
 
-      {/* Toolbar */}
-      <div className="flex flex-col sm:flex-row gap-3 items-center justify-between">
-        <div className="flex gap-2 p-1 bg-slate-100 rounded-xl">
-          {majorGroups.map((mg) => (
-            <button key={mg.id} onClick={() => setActiveTab(mg.name)} className={`px-6 py-1.5 rounded-lg text-xs font-semibold transition-all ${activeTab === mg.name ? 'bg-white text-indigo-600 shadow-sm' : 'text-slate-500 hover:text-slate-700'}`}>
-              {mg.name}
-            </button>
-          ))}
+      {/* Header Section (Patokan Itemlist) */}
+      <section className="space-y-8">
+        <div className="flex flex-col md:flex-row md:items-end justify-between gap-6">
+          <div className="space-y-1">
+            <h1 className="text-3xl font-semibold text-slate-900 tracking-tight">Recipe Master</h1>
+            <p className="text-slate-500 text-sm font-medium">Kelola bahan baku dan kalkulasi HPP otomatis secara real-time.</p>
+          </div>
+          <button 
+            onClick={() => { setIsEdit(false); setRecipeItems([]); setShowModal(true); }} 
+            className="bg-indigo-600 hover:bg-indigo-700 text-white px-5 py-2.5 rounded-xl font-medium flex items-center gap-2 transition-all shadow-sm active:scale-95"
+          >
+            <Plus size={18}/> Menu Baru
+          </button>
         </div>
-        <div className="relative w-full sm:w-72">
-          <Search className="absolute left-3 top-1/2 -translate-y-1/2 text-slate-400" size={14} />
-          <input type="text" placeholder="Cari menu..." className="w-full pl-9 pr-3 py-2 bg-white border border-slate-200 rounded-xl outline-none text-xs focus:ring-1 ring-indigo-200" value={searchTerm} onChange={(e) => setSearchTerm(e.target.value)} />
-        </div>
-      </div>
 
-      {/* Main Table */}      
-      <div className="bg-white rounded-2xl border border-slate-100 overflow-hidden shadow-sm">
-        <table className="w-full text-left text-xs">
-          <thead>
-            <tr className="bg-slate-50/50 text-slate-500 border-b border-slate-100">
-              <th className="px-6 py-3 w-10"></th>
-              <th className="px-2 py-3 font-semibold uppercase">SKU / Nama Menu</th>
-              <th className="px-6 py-3 text-center font-semibold uppercase">Grup</th>
-              <th className="px-6 py-3 text-right font-semibold uppercase">Q-Factor</th>
-              <th className="px-6 py-3 text-right font-semibold uppercase text-indigo-600">Total HPP</th>
-              <th className="px-6 py-3 text-center font-semibold uppercase">Aksi</th>
-            </tr>
-          </thead>
-          <tbody className="divide-y divide-slate-50">
-            {loading ? (
-              <tr><td colSpan={6} className="text-center py-10 text-slate-400 italic">Memuat data...</td></tr>
-            ) : menus.filter(m => m.majorGroup?.name === activeTab && m.name.toLowerCase().includes(searchTerm.toLowerCase())).map((m) => (
-              <React.Fragment key={m.id}>
-                {/* Clickable row to show detail */}
-                <tr 
-                  className="hover:bg-slate-50/50 cursor-pointer group transition-colors" 
-                  onClick={() => toggleExpand(m.id)}
-                >
-                  <td className="px-6 py-3 text-slate-400">
-                    {expandedIds.includes(m.id) ? <ChevronUp size={14}/> : <ChevronDown size={14}/>}
-                  </td>
-                  <td className="px-2 py-3">
-                    <div className="flex flex-col">
-                      <span className="text-[10px] text-slate-400">{m.sku}</span>
-                      <span className="font-semibold text-slate-700">{m.name}</span>
-                    </div>
-                  </td>
-                  <td className="px-6 py-3 text-center italic text-slate-500">{m.menuGroup?.name}</td>
-                  <td className="px-6 py-3 text-right text-slate-500 font-medium">{m.qFactor}%</td>
-                  <td className="px-6 py-3 text-right font-bold text-slate-800">Rp {Number(m.totalAmount || 0).toLocaleString()}</td>
-                  <td className="px-6 py-3 text-center">
-                    <div className="flex justify-center gap-1">
-                      <button onClick={(e) => { e.stopPropagation(); handleEdit(m); }} className="p-1.5 text-slate-400 hover:text-indigo-600 transition-colors"><Edit2 size={14}/></button>
-                      <button onClick={(e) => { e.stopPropagation(); handleDelete(m.id); }} className="p-1.5 text-slate-400 hover:text-red-500 transition-colors"><Trash2 size={14}/></button>
-                    </div>
-                  </td>
-                </tr>
-                {/* Detail Recipe Items - Visible ONLY when expanded */}
-                {expandedIds.includes(m.id) && (
-                  <tr className="bg-slate-50/30">
-                    <td colSpan={6} className="px-10 py-4 border-y border-slate-100">
-                      <div className="grid grid-cols-2 gap-8 animate-in fade-in duration-300">
-                        <div className="space-y-1">
-                          <p className="text-[9px] font-bold text-slate-400 uppercase tracking-widest mb-2">Komposisi Bahan</p>
-                          {m.recipeItems?.map((ri: any, i: number) => (
-                            <div key={i} className="flex justify-between py-1 border-b border-slate-100 text-[11px]">
-                              <span className="text-slate-600">{ri.ingredient?.name}</span>
-                              <span className="font-semibold text-slate-500">{ri.quantity} {ri.uom}</span>
-                            </div>
-                          ))}
-                        </div>
-                        <div className="bg-white p-4 rounded-xl border border-slate-200 shadow-sm text-[11px] self-start">
-                           <div className="flex justify-between mb-1 text-slate-500"><span>Bahan Baku</span><span>Rp {Math.round(m.totalAmount / (1 + m.qFactor/100)).toLocaleString()}</span></div>
-                           <div className="flex justify-between mb-2 text-orange-500"><span>Q-Factor ({m.qFactor}%)</span><span>+ Rp {Math.round(m.totalAmount - (m.totalAmount / (1 + m.qFactor/100))).toLocaleString()}</span></div>
-                           <div className="pt-2 border-t border-slate-100 flex justify-between font-bold text-indigo-600">
-                             <span>TOTAL HPP</span><span>Rp {Number(m.totalAmount).toLocaleString()}</span>
-                           </div>
-                        </div>
-                      </div>
-                    </td>
-                  </tr>
-                )}
-              </React.Fragment>
+        {/* Info Box (Patokan Itemlist) */}
+        <div className="bg-indigo-50/50 border border-indigo-100 p-5 rounded-3xl flex flex-col md:flex-row md:items-center justify-between gap-4">
+            <div className="flex items-center gap-4 text-xs font-medium text-indigo-700">
+              <AlertCircle size={20} className="text-indigo-400" />
+              <p>HPP dihitung otomatis berdasarkan <b>Harga Beli Terakhir</b> bahan baku di Inventory List.</p>
+            </div>
+        </div>
+
+        {/* Toolbar & Filter (Patokan Itemlist) */}
+        <div className="flex flex-col md:flex-row gap-4 items-center justify-between">
+          <div className="flex gap-2 p-1 bg-slate-100 rounded-xl overflow-x-auto max-w-full">
+            {majorGroups.map((mg) => (
+              <button 
+                key={mg.id} 
+                onClick={() => setActiveTab(mg.name)} 
+                className={`px-6 py-1.5 rounded-lg text-xs font-semibold whitespace-nowrap transition-all ${activeTab === mg.name ? 'bg-white text-indigo-600 shadow-sm' : 'text-slate-500 hover:text-slate-700'}`}
+              >
+                {mg.name}
+              </button>
             ))}
-          </tbody>
-        </table>
-      </div>
-
-      {/* Group Setup - Always Visible (Static) */}
-      <div className="bg-white rounded-2xl border border-slate-100 shadow-sm overflow-hidden">
-        <div className="px-6 py-4 border-b border-slate-50">
-          <div className="flex items-center gap-2 font-bold text-xs text-slate-800 uppercase tracking-widest">
-            <Settings2 size={14} className="text-indigo-600"/> Setup Major & Menu Groups
+          </div>
+          <div className="relative w-full md:w-72">
+            <Search className="absolute left-4 top-1/2 -translate-y-1/2 text-slate-400" size={18} />
+            <input 
+              type="text" placeholder="Cari menu..." 
+              className="w-full pl-11 pr-4 py-2.5 bg-white border border-slate-200 rounded-2xl outline-none text-sm focus:ring-2 ring-indigo-500/10 transition-all shadow-sm" 
+              value={searchTerm} onChange={(e) => setSearchTerm(e.target.value)} 
+            />
           </div>
         </div>
 
-        <div className="p-6 grid grid-cols-1 md:grid-cols-2 gap-6">
-          <div className="space-y-4">
-            <h3 className="text-[10px] font-bold text-slate-400 uppercase tracking-widest flex items-center gap-2"><Layers size={14}/> Major Groups</h3>
-            <div className="flex gap-2">
-              <input placeholder="Nama Major Baru..." className="flex-1 bg-slate-50 px-3 py-1.5 rounded-lg text-xs outline-none border border-transparent focus:border-slate-200" />
-              <button className="bg-slate-800 text-white p-1.5 rounded-lg hover:bg-slate-900"><Plus size={16}/></button>
+        {/* Main Table Section (Patokan Itemlist) */}
+        <div className="bg-white rounded-2xl shadow-sm border border-slate-200 overflow-hidden">
+          <div 
+            onClick={() => setIsTableExpanded(!isTableExpanded)} 
+            className="px-6 py-4 flex justify-between items-center cursor-pointer hover:bg-slate-50/50 transition-colors bg-slate-50/30"
+          >
+            <h3 className="text-sm font-semibold text-slate-700">Daftar Menu {activeTab}</h3>
+            <div className="flex items-center gap-3">
+              <span className="text-xs font-medium text-slate-400 bg-slate-100 px-2 py-0.5 rounded-full">
+                {menus.filter(m => m.majorGroup?.name === activeTab).length} Recipes
+              </span>
+              {isTableExpanded ? <ChevronUp size={16} className="text-slate-400"/> : <ChevronDown size={16} className="text-slate-400"/>}
             </div>
-            <div className="space-y-1 max-h-40 overflow-y-auto pr-1 scrollbar-thin">
+          </div>
+
+          {isTableExpanded && (
+            <div className="overflow-x-auto border-t border-slate-100 animate-in fade-in duration-300">
+              <table className="w-full text-left border-collapse">
+                <thead>
+                  <tr className="bg-slate-50/50">
+                    <th className="px-6 py-3.5 w-10"></th>
+                    <th className="px-2 py-3.5 text-xs font-semibold text-slate-500 uppercase tracking-wider">SKU / Nama Menu</th>
+                    <th className="px-6 py-3.5 text-xs font-semibold text-slate-500 uppercase tracking-wider text-center">Grup</th>
+                    <th className="px-6 py-3.5 text-xs font-semibold text-slate-500 uppercase tracking-wider text-right">Q-Factor</th>
+                    <th className="px-6 py-3.5 text-xs font-semibold text-indigo-600 uppercase tracking-wider text-right">Total HPP</th>
+                    <th className="px-6 py-3.5 text-xs font-semibold text-slate-500 uppercase tracking-wider text-center">Aksi</th>
+                  </tr>
+                </thead>
+                <tbody className="divide-y divide-slate-100">
+                  {loading ? (
+                    <tr><td colSpan={6} className="text-center py-12 text-slate-400 text-sm"><Loader2 className="animate-spin mx-auto mb-2 text-indigo-500" /> Memuat resep...</td></tr>
+                  ) : menus.filter(m => m.majorGroup?.name === activeTab && m.name.toLowerCase().includes(searchTerm.toLowerCase())).map((m) => (
+                    <React.Fragment key={m.id}>
+                      <tr className="group hover:bg-slate-50/80 transition-all cursor-pointer" onClick={() => toggleExpand(m.id)}>
+                        <td className="px-6 py-4 text-slate-400">
+                          {expandedIds.includes(m.id) ? <ChevronUp size={14}/> : <ChevronDown size={14}/>}
+                        </td>
+                        <td className="px-2 py-4">
+                          <div className="flex flex-col">
+                            <span className="text-[10px] font-bold text-indigo-600 font-mono tracking-tighter uppercase">{m.sku}</span>
+                            <span className="text-sm font-semibold text-slate-800">{m.name}</span>
+                          </div>
+                        </td>
+                        <td className="px-6 py-4 text-center">
+                          <span className="px-2 py-1 bg-slate-100 rounded text-[10px] font-medium text-slate-500">{m.menuGroup?.name}</span>
+                        </td>
+                        <td className="px-6 py-4 text-right text-sm font-medium text-slate-500">{m.qFactor}%</td>
+                        <td className="px-6 py-4 text-right">
+                          <span className="text-sm font-bold text-slate-900">Rp {Number(m.totalAmount || 0).toLocaleString()}</span>
+                        </td>
+                        <td className="px-6 py-4">
+                          <div className="flex justify-center gap-1 opacity-0 group-hover:opacity-100 transition-opacity">
+                            <button onClick={(e) => { e.stopPropagation(); handleEdit(m); }} className="p-1.5 text-slate-400 hover:text-indigo-600 hover:bg-indigo-50 rounded-lg transition-all"><Edit2 size={15}/></button>
+                            <button onClick={async (e) => { e.stopPropagation(); if(confirm('Hapus resep?')) { await fetch(`http://localhost:3000/menu/${m.id}`, {method:'DELETE'}); fetchData(); } }} className="p-1.5 text-slate-400 hover:text-red-600 hover:bg-red-50 rounded-lg transition-all"><Trash2 size={15}/></button>
+                          </div>
+                        </td>
+                      </tr>
+                      {expandedIds.includes(m.id) && (
+                        <tr className="bg-slate-50/30">
+                          <td colSpan={6} className="px-10 py-6 border-y border-slate-100">
+                            <div className="grid grid-cols-1 md:grid-cols-2 gap-12 animate-in fade-in slide-in-from-top-2 duration-300">
+                              <div className="space-y-3">
+                                <p className="text-[10px] font-bold text-slate-400 uppercase tracking-widest border-b border-slate-200 pb-2">Komposisi Bahan</p>
+                                {m.recipeItems?.map((ri: any, i: number) => (
+                                  <div key={i} className="flex justify-between items-center py-1.5 text-xs">
+                                    <span className="text-slate-600 font-medium">{ri.ingredient?.name}</span>
+                                    <span className="font-bold text-slate-500 bg-white px-2 py-0.5 rounded border border-slate-100">{ri.quantity} {ri.uom}</span>
+                                  </div>
+                                ))}
+                              </div>
+                              <div className="bg-white p-6 rounded-2xl border border-slate-200 shadow-sm self-start space-y-3">
+                                 <p className="text-[10px] font-bold text-slate-400 uppercase tracking-widest border-b border-slate-100 pb-2">Kalkulasi Biaya</p>
+                                 <div className="flex justify-between text-xs text-slate-500 italic"><span>Bahan Baku</span><span>Rp {Math.round(m.totalAmount / (1 + m.qFactor/100)).toLocaleString()}</span></div>
+                                 <div className="flex justify-between text-xs text-orange-500 italic"><span>Q-Factor ({m.qFactor}%)</span><span>+ Rp {Math.round(m.totalAmount - (m.totalAmount / (1 + m.qFactor/100))).toLocaleString()}</span></div>
+                                 <div className="pt-3 border-t border-slate-200 flex justify-between items-end">
+                                   <span className="text-[10px] font-bold text-slate-400 uppercase">Total HPP</span>
+                                   <span className="text-lg font-black text-indigo-600">Rp {Number(m.totalAmount).toLocaleString()}</span>
+                                 </div>
+                              </div>
+                            </div>
+                          </td>
+                        </tr>
+                      )}
+                    </React.Fragment>
+                  ))}
+                </tbody>
+              </table>
+            </div>
+          )}
+        </div>
+      </section>
+
+      {/* Group Setup (Patokan Itemlist style) */}
+      <section className="pt-12 border-t border-slate-100">
+        <div className="flex items-center gap-3 mb-8">
+          <div className="w-10 h-10 bg-indigo-50 text-indigo-600 rounded-xl flex items-center justify-center"><LayoutGrid size={20} /></div>
+          <h2 className="text-xl font-semibold text-slate-800">Setup Groups</h2>
+        </div>
+
+        <div className="grid grid-cols-1 lg:grid-cols-2 gap-8">
+          {/* Major Groups Setup */}
+          <div className="bg-slate-50/50 p-6 rounded-3xl border border-slate-200/60 space-y-6">
+            <h3 className="text-[10px] font-bold text-slate-400 uppercase tracking-widest flex items-center gap-2"><Layers size={14}/> Manage Major Groups</h3>
+            <div className="flex gap-2">
+              <input 
+                placeholder="Nama Major..." 
+                className="flex-1 bg-white border border-slate-200 rounded-xl px-4 py-2.5 text-sm outline-none focus:ring-2 focus:ring-indigo-500/10 transition-all" 
+                value={newMajorName} onChange={(e) => setNewMajorName(e.target.value)}
+              />
+              <button onClick={handleAddMajorGroup} className="bg-slate-900 hover:bg-black text-white px-4 rounded-xl transition-all active:scale-95"><Plus size={20}/></button>
+            </div>
+            <div className="flex flex-wrap gap-2">
               {majorGroups.map(mg => (
-                <div key={mg.id} className="flex justify-between items-center p-2 bg-slate-50 rounded-lg text-[11px] group">
-                  <span>{mg.name}</span>
-                  <button className="text-slate-300 group-hover:text-red-500"><Trash2 size={12}/></button>
+                <div key={mg.id} className="bg-white border border-slate-200 px-3 py-1.5 rounded-lg text-xs font-semibold flex items-center gap-3 shadow-sm group">
+                  {mg.name}
+                  <button onClick={() => handleDeleteGroup('major', mg.id)} className="text-slate-300 hover:text-red-500 transition-colors"><X size={14}/></button>
                 </div>
               ))}
             </div>
           </div>
 
-          <div className="space-y-4">
-            <h3 className="text-[10px] font-bold text-slate-400 uppercase tracking-widest flex items-center gap-2"><Package size={14}/> Menu Groups</h3>
-            <div className="space-y-2">
-              <select className="w-full bg-slate-50 px-3 py-1.5 rounded-lg text-xs outline-none border border-transparent focus:border-slate-200">
-                <option>Pilih Major Group...</option>
-                {majorGroups.map(mg => <option key={mg.id}>{mg.name}</option>)}
+          {/* Menu Groups Setup */}
+          <div className="bg-slate-50/50 p-6 rounded-3xl border border-slate-200/60 space-y-6">
+            <h3 className="text-[10px] font-bold text-slate-400 uppercase tracking-widest flex items-center gap-2"><Package size={14}/> Manage Menu Groups</h3>
+            <div className="space-y-3">
+              <select className="w-full bg-white border border-slate-200 rounded-xl px-4 py-2.5 text-sm font-medium outline-none cursor-pointer" value={selectedMajorForGroup} onChange={(e) => setSelectedMajorForGroup(e.target.value)}>
+                <option value="">Pilih Major...</option>
+                {majorGroups.map(mg => <option key={mg.id} value={mg.id}>{mg.name}</option>)}
               </select>
               <div className="flex gap-2">
-                <input placeholder="Nama Menu Group Baru..." className="flex-1 bg-slate-50 px-3 py-1.5 rounded-lg text-xs outline-none border border-transparent focus:border-slate-200" />
-                <button className="bg-indigo-600 text-white p-1.5 rounded-lg hover:bg-indigo-700"><Plus size={16}/></button>
+                <input 
+                  placeholder="Nama Menu Group..." 
+                  className="flex-1 bg-white border border-slate-200 rounded-xl px-4 py-2.5 text-sm outline-none focus:ring-2 focus:ring-indigo-500/10 transition-all" 
+                  value={newMenuGroupName} onChange={(e) => setNewMenuGroupName(e.target.value)}
+                />
+                <button onClick={handleAddMenuGroup} className="bg-indigo-600 hover:bg-indigo-700 text-white px-4 rounded-xl transition-all active:scale-95"><Plus size={20}/></button>
               </div>
             </div>
-            <div className="space-y-1 max-h-40 overflow-y-auto pr-1 scrollbar-thin">
+            <div className="flex flex-wrap gap-2">
               {menuGroups.map(g => (
-                <div key={g.id} className="flex justify-between items-center p-2 bg-slate-50 rounded-lg text-[11px] group">
-                  <span>{g.name} <span className="text-[9px] text-slate-400 ml-1">({g.majorGroup?.name})</span></span>
-                  <button className="text-slate-300 group-hover:text-red-500"><Trash2 size={12}/></button>
+                <div key={g.id} className="bg-white border border-slate-200 px-3 py-1.5 rounded-lg text-xs font-semibold flex items-center gap-3 shadow-sm group">
+                  <span className="text-slate-400 font-bold mr-1">{g.majorGroup?.name} /</span> {g.name}
+                  <button onClick={() => handleDeleteGroup('menu', g.id)} className="text-slate-300 hover:text-red-500 transition-colors"><X size={14}/></button>
                 </div>
               ))}
             </div>
           </div>
         </div>
-      </div>
+      </section>
 
-      {/* Modal Builder */}
+      {/* Modal Builder (Updated Layout) */}
       {showModal && (
-        <div className="fixed inset-0 bg-slate-900/40 backdrop-blur-sm flex items-center justify-center z-[200] p-4">
-          <div className="bg-white rounded-3xl w-full max-w-5xl shadow-2xl overflow-hidden flex flex-col h-[85vh] border border-slate-100">
-            <div className="px-8 py-4 border-b flex justify-between items-center bg-white">
+        <div className="fixed inset-0 bg-slate-900/40 backdrop-blur-[2px] flex items-center justify-center z-[200] p-4">
+          <div className="bg-white rounded-[2.5rem] w-full max-w-5xl shadow-2xl overflow-hidden flex flex-col h-[85vh] border border-slate-100 animate-in zoom-in-95 duration-200">
+            <div className="px-8 py-5 border-b flex justify-between items-center bg-white">
               <div className="flex items-center gap-3">
-                <ChefHat size={18} className="text-indigo-600" />
-                <h2 className="text-sm font-bold text-slate-800">{isEdit ? 'Update Menu' : 'Tambah Menu Baru'}</h2>
+                <div className="w-10 h-10 bg-indigo-50 text-indigo-600 rounded-xl flex items-center justify-center"><ChefHat size={20} /></div>
+                <div>
+                  <h2 className="text-lg font-bold text-slate-800">{isEdit ? 'Update Resep' : 'Tambah Menu Baru'}</h2>
+                  <p className="text-[10px] font-medium text-slate-400">Pastikan komposisi bahan sudah sesuai takaran saji.</p>
+                </div>
               </div>
-              <button onClick={() => setShowModal(false)} className="text-slate-400 hover:text-red-500 transition-colors"><X size={18}/></button>
+              <button onClick={() => setShowModal(false)} className="w-10 h-10 flex items-center justify-center bg-slate-50 text-slate-400 rounded-full hover:bg-red-50 hover:text-red-500 transition-all"><X size={20}/></button>
             </div>
 
             <div className="flex-1 flex overflow-hidden">
-              <div className="w-72 border-r bg-slate-50/50 p-5 flex flex-col gap-5 overflow-y-auto">
-                <div className="space-y-2">
-                  <p className="text-[10px] font-bold text-slate-400 uppercase tracking-widest px-1">Informasi</p>
-                  <input className="w-full bg-white border border-slate-200 rounded-lg p-2 text-[11px] outline-none" placeholder="Nama Menu" value={formData.name} onChange={e => setFormData({...formData, name: e.target.value})} />
-                  <select className="w-full bg-white border border-slate-200 rounded-lg p-2 text-[11px] outline-none" value={formData.majorGroupId} onChange={e => setFormData({...formData, majorGroupId: e.target.value})}>
-                    <option value="">Pilih Major...</option>
-                    {majorGroups.map(mg => <option key={mg.id} value={mg.id}>{mg.name}</option>)}
-                  </select>
-                  <select className="w-full bg-white border border-slate-200 rounded-lg p-2 text-[11px] outline-none" value={formData.menuGroupId} onChange={e => setFormData({...formData, menuGroupId: e.target.value})}>
-                    <option value="">Pilih Grup...</option>
-                    {menuGroups.filter(g => g.majorGroupId === formData.majorGroupId).map(g => <option key={g.id} value={g.id}>{g.name}</option>)}
-                  </select>
-                </div>
-                <div className="flex-1 flex flex-col min-h-0">
-                  <p className="text-[10px] font-bold text-slate-400 uppercase tracking-widest px-1 mb-2">Bahan Baku</p>
-                  <div className="relative mb-2">
-                    <Search className="absolute left-2 top-1/2 -translate-y-1/2 text-slate-400" size={12} />
-                    <input type="text" placeholder="Cari bahan..." className="w-full pl-7 pr-3 py-1.5 bg-white border border-slate-200 rounded-lg text-[11px] outline-none" value={ingredientSearch} onChange={e => setIngredientSearch(e.target.value)} />
+              {/* Sidebar: Form & Ingredient Search */}
+              <div className="w-80 border-r bg-slate-50/50 p-6 flex flex-col gap-6 overflow-y-auto">
+                <div className="space-y-4">
+                  <label className="text-[10px] font-bold text-slate-400 uppercase tracking-widest px-1">Informasi Menu</label>
+                  <input className="w-full bg-white border border-slate-200 rounded-xl p-3 text-sm font-medium outline-none focus:ring-2 ring-indigo-500/10" placeholder="Nama Menu" value={formData.name} onChange={e => setFormData({...formData, name: e.target.value})} />
+                  <div className="grid grid-cols-1 gap-2">
+                    <select className="w-full bg-white border border-slate-200 rounded-xl p-3 text-xs font-semibold outline-none cursor-pointer" value={formData.majorGroupId} onChange={e => setFormData({...formData, majorGroupId: e.target.value})}>
+                      <option value="">Pilih Major...</option>
+                      {majorGroups.map(mg => <option key={mg.id} value={mg.id}>{mg.name}</option>)}
+                    </select>
+                    <select className="w-full bg-white border border-slate-200 rounded-xl p-3 text-xs font-semibold outline-none cursor-pointer" value={formData.menuGroupId} onChange={e => setFormData({...formData, menuGroupId: e.target.value})}>
+                      <option value="">Pilih Grup...</option>
+                      {menuGroups.filter(g => g.majorGroupId === formData.majorGroupId).map(g => <option key={g.id} value={g.id}>{g.name}</option>)}
+                    </select>
                   </div>
-                  <div className="flex-1 overflow-y-auto space-y-1 pr-1 scrollbar-thin">
+                </div>
+
+                <div className="flex-1 flex flex-col min-h-0 border-t border-slate-200 pt-6">
+                  <label className="text-[10px] font-bold text-slate-400 uppercase tracking-widest px-1 mb-4">Pilih Bahan Baku</label>
+                  <div className="relative mb-3">
+                    <Search className="absolute left-3 top-1/2 -translate-y-1/2 text-slate-400" size={16} />
+                    <input type="text" placeholder="Cari bahan..." className="w-full pl-10 pr-4 py-2.5 bg-white border border-slate-200 rounded-xl text-sm outline-none" value={ingredientSearch} onChange={e => setIngredientSearch(e.target.value)} />
+                  </div>
+                  <div className="flex-1 overflow-y-auto space-y-2 pr-1 scrollbar-thin">
                     {filteredProducts.map(p => (
-                      <button key={p.id} onClick={() => addIngredient(p)} className="w-full text-left p-2 bg-white border border-slate-100 rounded-lg hover:bg-indigo-600 hover:text-white transition-all text-[11px] font-medium truncate">
-                        {p.name}
+                      <button 
+                        key={p.id} 
+                        onClick={() => handleAddIngredient(p)} // Pastikan nama fungsi ini sinkron
+                        className="w-full text-left p-3 bg-white border border-slate-200 rounded-xl hover:bg-indigo-600 hover:text-white hover:border-indigo-600 transition-all text-xs font-bold group flex justify-between items-center"
+                      >
+                        <span className="truncate">{p.name}</span>
+                        <Plus size={14} className="text-indigo-400 group-hover:text-white" />
                       </button>
                     ))}
                   </div>
                 </div>
               </div>
 
+              {/* Content: Selected Ingredients */}
               <div className="flex-1 flex flex-col bg-white">
-                <div className="flex-1 p-6 overflow-y-auto space-y-2 scrollbar-thin">
-                  {recipeItems.map((item, idx) => (
-                    <div key={idx} className="flex items-center gap-4 p-3 border border-slate-100 rounded-xl bg-white group hover:border-indigo-100">
+                <div className="flex-1 p-8 overflow-y-auto space-y-3 scrollbar-thin">
+                  {recipeItems.length === 0 ? (
+                    <div className="h-full flex flex-col items-center justify-center text-slate-300 gap-4">
+                      <div className="w-20 h-20 bg-slate-50 rounded-full flex items-center justify-center"><Package size={40} /></div>
+                      <p className="text-sm font-medium italic">Belum ada bahan yang dipilih.</p>
+                    </div>
+                  ) : recipeItems.map((item, idx) => (
+                    <div key={idx} className="flex items-center gap-6 p-4 border border-slate-100 rounded-2xl bg-white shadow-sm hover:border-indigo-100 transition-all group">
                       <div className="flex-1">
-                        <p className="text-[11px] font-semibold text-slate-700">{item.name}</p>
-                        <p className="text-[9px] text-slate-400">Rp {Math.round(item.buyPrice / item.conversionRate).toLocaleString()} / {item.uom}</p>
+                        <p className="text-sm font-bold text-slate-800">{item.name}</p>
+                        <p className="text-[10px] font-medium text-slate-400">Est. Price: Rp {Math.round(item.buyPrice / item.conversionRate).toLocaleString()} / {item.uom}</p>
                       </div>
-                      <div className="flex items-center gap-4">
-                        <div className="flex items-center bg-slate-50 rounded border border-slate-100">
-                          <input type="number" className="w-12 bg-transparent p-1 text-center font-bold text-[11px] outline-none" value={item.quantity} onChange={e => updateItemQty(idx, Number(e.target.value))} />
-                          <span className="pr-2 text-[9px] font-bold text-slate-400">{item.uom}</span>
+                      <div className="flex items-center gap-6">
+                        <div className="flex items-center bg-slate-50 rounded-xl border border-slate-200 overflow-hidden">
+                          <input 
+                            type="number" 
+                            className="w-16 bg-transparent p-2 text-center font-black text-sm outline-none" 
+                            value={item.quantity} 
+                            onChange={e => handleUpdateItemQty(idx, Number(e.target.value))} // Sesuaikan di sini
+                          />
+                          <span className="pr-4 text-[10px] font-black text-slate-400 uppercase tracking-tighter">
+                            {item.uom}
+                          </span>
                         </div>
-                        <p className="w-20 text-right text-[11px] font-bold">Rp {Math.round(item.cost).toLocaleString()}</p>
-                        <button onClick={() => setRecipeItems(recipeItems.filter((_, i) => i !== idx))} className="text-slate-300 hover:text-red-500"><Trash2 size={14}/></button>
+                        <p className="w-24 text-right text-sm font-black text-slate-700">
+                          Rp {Math.round(item.cost).toLocaleString()}
+                        </p>
+                        {/* Tombol Hapus Item */}
+                        <button 
+                          onClick={() => setRecipeItems(recipeItems.filter((_, i) => i !== idx))} 
+                          className="w-8 h-8 flex items-center justify-center text-slate-300 hover:text-red-500 hover:bg-red-50 rounded-full transition-all"
+                        >
+                          <Trash2 size={16}/>
+                        </button>
                       </div>
                     </div>
                   ))}
                 </div>
-                <div className="p-6 border-t bg-slate-50/30 flex justify-between items-center">
-                  <div className="flex gap-6">
+
+                {/* Footer Modal: Summary & Action */}
+                <div className="p-8 border-t bg-slate-50/50 flex flex-col sm:flex-row justify-between items-center gap-6">
+                  <div className="flex gap-10">
                     <div>
-                      <span className="text-[9px] font-bold text-slate-400 uppercase block mb-1">Q-Factor %</span>
-                      <input type="number" className="w-16 border rounded p-1 text-xs font-bold outline-none" value={formData.qFactor} onChange={e => setFormData({...formData, qFactor: Number(e.target.value)})} />
+                      <span className="text-[10px] font-bold text-slate-400 uppercase block mb-1">Q-Factor Adjustment</span>
+                      <div className="flex items-center gap-2">
+                         <input type="number" className="w-20 bg-white border border-slate-200 rounded-xl p-2 text-sm font-black outline-none focus:ring-2 ring-indigo-500/10" value={formData.qFactor} onChange={e => setFormData({...formData, qFactor: Number(e.target.value)})} />
+                         <span className="text-sm font-bold text-slate-400">%</span>
+                      </div>
                     </div>
+                    <div className="h-10 w-[1px] bg-slate-200 hidden sm:block"></div>
                     <div>
-                      <span className="text-[9px] font-bold text-indigo-600 uppercase block mb-1">Total HPP</span>
-                      <p className="text-xl font-bold text-slate-900">Rp {Math.round(finalHpp).toLocaleString()}</p>
+                      <span className="text-[10px] font-bold text-indigo-600 uppercase block mb-1">Estimated HPP</span>
+                      <p className="text-2xl font-black text-slate-900 leading-none">Rp {Math.round(finalHpp).toLocaleString()}</p>
                     </div>
                   </div>
-                  <button onClick={handleSave} disabled={isSubmitting || recipeItems.length === 0} className="bg-indigo-600 hover:bg-indigo-700 text-white px-8 py-2 rounded-xl font-bold text-xs flex items-center gap-2 shadow-lg disabled:opacity-50">
-                    {isSubmitting ? <Loader2 size={14} className="animate-spin"/> : <><Save size={14}/> SIMPAN</>}
+                  <button 
+                    onClick={handleSave} 
+                    disabled={isSubmitting || recipeItems.length === 0} 
+                    className="w-full sm:w-auto bg-indigo-600 hover:bg-indigo-700 text-white px-12 py-4 rounded-2xl font-bold text-sm flex items-center justify-center gap-3 shadow-xl shadow-indigo-100 transition-all active:scale-95 disabled:opacity-50"
+                  >
+                    {isSubmitting ? <Loader2 size={20} className="animate-spin"/> : <><Save size={20}/> SIMPAN RESEP</>}
                   </button>
                 </div>
               </div>
