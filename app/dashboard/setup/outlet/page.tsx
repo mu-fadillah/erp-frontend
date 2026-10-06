@@ -12,8 +12,11 @@ import {
   Loader2,
   X
 } from 'lucide-react';
+import toast from 'react-hot-toast';
+import { fetchApi } from '../../../utils/api'; // Menggunakan utilitas global API
 
 export default function OutletSetupPage() {
+  // --- STATE MANAGEMENT ---
   const [outlets, setOutlets] = useState<any[]>([]);
   const [loading, setLoading] = useState(true);
   const [isModalOpen, setIsModalOpen] = useState(false);
@@ -25,9 +28,9 @@ export default function OutletSetupPage() {
     picName: '',
     address: ''
   });
+  // --- AKHIR STATE MANAGEMENT ---
 
-  const API_URL = 'http://localhost:3000/outlet';
-
+  // --- LIFECYCLE & FETCH DATA ---
   useEffect(() => {
     fetchOutlets();
   }, []);
@@ -35,49 +38,65 @@ export default function OutletSetupPage() {
   const fetchOutlets = async () => {
     try {
       setLoading(true);
-      const res = await fetch(API_URL);
+      const res = await fetchApi('/outlet');
       const data = await res.json();
-      setOutlets(data);
+      
+      // Safeguard untuk array
+      if (Array.isArray(data)) {
+        setOutlets(data);
+      } else {
+        setOutlets([]);
+      }
     } catch (err) {
-      console.error("Gagal memuat data outlet", err);
+      toast.error("Gagal memuat data outlet");
     } finally {
       setLoading(false);
     }
   };
+  // --- AKHIR LIFECYCLE & FETCH DATA ---
 
+  // --- SUBMIT & DELETE HANDLERS ---
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
     const method = editingId ? 'PATCH' : 'POST';
-    const url = editingId ? `${API_URL}/${editingId}` : API_URL;
+    const url = editingId ? `/outlet/${editingId}` : '/outlet';
 
     try {
-      const res = await fetch(url, {
+      const res = await fetchApi(url, {
         method,
-        headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify(formData),
       });
 
       if (res.ok) {
         closeModal();
         fetchOutlets();
+        toast.success(editingId ? "Outlet berhasil diperbarui" : "Outlet berhasil ditambahkan");
       } else {
-        alert("Gagal menyimpan. Pastikan nama outlet belum digunakan.");
+        const errData = await res.json();
+        toast.error(errData.message || "Gagal menyimpan. Pastikan nama outlet belum digunakan.");
       }
     } catch (err) {
-      alert("Terjadi kesalahan koneksi ke server.");
+      toast.error("Terjadi kesalahan koneksi ke server.");
     }
   };
 
   const handleDelete = async (id: string) => {
     if (!confirm("Hapus outlet ini secara permanen?")) return;
     try {
-      const res = await fetch(`${API_URL}/${id}`, { method: 'DELETE' });
-      if (res.ok) fetchOutlets();
+      const res = await fetchApi(`/outlet/${id}`, { method: 'DELETE' });
+      if (res.ok) {
+        fetchOutlets();
+        toast.success("Outlet berhasil dihapus");
+      } else {
+        toast.error("Gagal menghapus data outlet.");
+      }
     } catch (err) {
-      alert("Gagal menghapus data.");
+      toast.error("Gagal menghapus data. Koneksi terputus.");
     }
   };
+  // --- AKHIR SUBMIT & DELETE HANDLERS ---
 
+  // --- MODAL HANDLERS ---
   const openModal = (outlet?: any) => {
     if (outlet) {
       setEditingId(outlet.id);
@@ -97,6 +116,7 @@ export default function OutletSetupPage() {
     setIsModalOpen(false);
     setEditingId(null);
   };
+  // --- AKHIR MODAL HANDLERS ---
 
   const filteredOutlets = outlets.filter(o => 
     o.name.toLowerCase().includes(searchTerm.toLowerCase()) ||
@@ -105,7 +125,8 @@ export default function OutletSetupPage() {
 
   return (
     <div className="p-4 md:p-8 max-w-[1400px] mx-auto min-h-screen">
-      {/* Header Section */}
+      
+      {/* --- HEADER SECTION --- */}
       <div className="flex flex-col md:flex-row md:items-end justify-between gap-6 mb-12">
         <div>
           <h1 className="text-3xl font-semibold text-slate-800 tracking-tight">Outlets</h1>
@@ -131,8 +152,10 @@ export default function OutletSetupPage() {
           </button>
         </div>
       </div>
+      {/* --- AKHIR HEADER SECTION --- */}
 
-      {/* Grid Content */}
+
+      {/* --- GRID CONTENT (DAFTAR OUTLET) --- */}
       {loading ? (
         <div className="flex flex-col items-center justify-center py-32 bg-white/50 rounded-[2.5rem] border border-dashed border-slate-200">
           <Loader2 className="animate-spin text-indigo-500 mb-4" size={32} />
@@ -141,6 +164,8 @@ export default function OutletSetupPage() {
       ) : (
         <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-8">
           {filteredOutlets.map((outlet) => (
+            
+            /* --- KARTU OUTLET --- */
             <div key={outlet.id} className="bg-white p-7 rounded-[2.5rem] border border-slate-100 shadow-sm hover:shadow-xl hover:shadow-indigo-500/5 transition-all duration-300 group relative">
               <div className="flex justify-between items-start mb-6">
                 <div className="w-14 h-14 bg-indigo-50 rounded-2xl flex items-center justify-center text-indigo-600 group-hover:bg-indigo-600 group-hover:text-white transition-all duration-300">
@@ -179,11 +204,15 @@ export default function OutletSetupPage() {
                 </div>
               </div>
             </div>
+            /* --- AKHIR KARTU OUTLET --- */
+            
           ))}
         </div>
       )}
+      {/* --- AKHIR GRID CONTENT --- */}
 
-      {/* Modal CRUD */}
+
+      {/* --- MODAL FORM PEMBUATAN / EDIT OUTLET --- */}
       {isModalOpen && (
         <div className="fixed inset-0 z-[100] flex items-center justify-center p-4">
           <div className="absolute inset-0 bg-slate-900/40 backdrop-blur-sm" onClick={closeModal} />
@@ -201,6 +230,7 @@ export default function OutletSetupPage() {
                 </button>
               </div>
 
+              {/* --- FORM INPUT --- */}
               <form onSubmit={handleSubmit} className="space-y-6">
                 <div>
                   <label className="text-xs font-semibold text-slate-500 ml-1">Outlet Name</label>
@@ -238,10 +268,14 @@ export default function OutletSetupPage() {
                   {editingId ? 'Update Outlet' : 'Create Outlet'}
                 </button>
               </form>
+              {/* --- AKHIR FORM INPUT --- */}
+
             </div>
           </div>
         </div>
       )}
+      {/* --- AKHIR MODAL FORM --- */}
+
     </div>
   );
 }

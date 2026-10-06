@@ -15,7 +15,7 @@ import PageHeader from '@/components/ui/PageHeader';
 import AnimatedWrapper from '@/components/ui/AnimatedWrapper';
 import BentoCard from '@/components/ui/BentoCard';
 import EmptyState from '@/components/ui/EmptyState';
-import StatusBadge from '@/components/ui/StatusBadge'; // New Component ✅
+import StatusBadge from '@/components/ui/StatusBadge'; 
 
 /* ===================================================================================
    INTERFACES
@@ -52,7 +52,10 @@ export default function ReceivingPage() {
   const [suratJalan, setSuratJalan] = useState<{ [key: string]: string }>({});
   const [expandedPOs, setExpandedPOs] = useState<{ [key: string]: boolean }>({});
   
-  const API_URL = 'http://localhost:3000';
+  const API_URL = process.env.NEXT_PUBLIC_API_URL || 'http://localhost:3000';
+
+  // --- TAMBAHAN: Fungsi pengambil token ---
+  const getToken = () => document.cookie.split('; ').find(row => row.startsWith('token='))?.split('=')[1];
 
   /* ===================================================================================
      DATA FETCHING
@@ -60,14 +63,28 @@ export default function ReceivingPage() {
   const fetchActivePOs = useCallback(async () => {
     try {
       setLoading(true);
-      const res = await fetch(`${API_URL}/purchasing/po/list?status=SENT`);
+      
+      // --- PERBAIKAN: Sisipkan token pada request GET ---
+      const res = await fetch(`${API_URL}/purchasing/po/list?status=SENT`, {
+        headers: { Authorization: `Bearer ${getToken()}` }
+      });
+      
       const data = await res.json();
+      
+      // --- PERBAIKAN: Safeguard jika data bukan array (misal 401/403) ---
+      if (!Array.isArray(data)) {
+        setActivePOs([]);
+        return;
+      }
+
       const onlySent = data
         .filter((po: any) => po.status === 'SENT')
         .sort((a: any, b: any) => b.orderNumber.localeCompare(a.orderNumber));
+      
       setActivePOs(onlySent);
     } catch (err) {
       console.error("Error fetching POs:", err);
+      setActivePOs([]); // Pastikan selalu state fallback array kosong jika gagal
     } finally {
       setLoading(false);
     }
@@ -117,16 +134,24 @@ export default function ReceivingPage() {
     if (!confirm(`Konfirmasi penerimaan SJ: ${sjNumber}?`)) return;
 
     try {
+      // --- PERBAIKAN: Sisipkan token pada request PATCH ---
       const res = await fetch(`${API_URL}/purchasing/po/receive`, {
         method: 'PATCH',
-        headers: { 'Content-Type': 'application/json' },
+        headers: { 
+          'Content-Type': 'application/json',
+          Authorization: `Bearer ${getToken()}` 
+        },
         body: JSON.stringify({ items: itemsToSubmit, referenceNo: sjNumber })
       });
+      
       if (res.ok) {
         alert("Success!");
         setReceiveData({});
         setSuratJalan(prev => { const n = {...prev}; delete n[poId]; return n; });
         fetchActivePOs();
+      } else {
+        const errorData = await res.json();
+        alert("Gagal: " + (errorData.message || "Terjadi kesalahan server"));
       }
     } catch (err) { alert("Error processing request"); }
   };

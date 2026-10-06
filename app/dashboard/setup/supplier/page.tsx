@@ -5,11 +5,15 @@ import {
   Plus, Search, Mail, Phone, Edit2, Trash2, 
   Loader2, X, MapPin, Factory
 } from 'lucide-react';
+import toast from 'react-hot-toast';
+import { fetchApi } from '../../../utils/api'; // Menggunakan utilitas global API
 
 export default function SupplierSetupPage() {
+  // --- STATE MANAGEMENT ---
   const [suppliers, setSuppliers] = useState<any[]>([]);
   const [loading, setLoading] = useState(true);
   const [searchTerm, setSearchTerm] = useState('');
+  
   const [isModalOpen, setIsModalOpen] = useState(false);
   const [isEditMode, setIsEditMode] = useState(false);
   const [currentId, setCurrentId] = useState<string | null>(null);
@@ -20,17 +24,17 @@ export default function SupplierSetupPage() {
     phoneNumber: '',
     address: ''
   });
+  // --- AKHIR STATE MANAGEMENT ---
 
-  const API_URL = 'http://localhost:3000/supplier';
-
+  // --- FETCH DATA ---
   const fetchSuppliers = useCallback(async () => {
     setLoading(true);
     try {
-      const res = await fetch(API_URL);
+      const res = await fetchApi('/supplier');
       const data = await res.json();
       setSuppliers(Array.isArray(data) ? data : []);
     } catch (err) {
-      console.error("Gagal mengambil data", err);
+      toast.error("Gagal mengambil data supplier");
     } finally {
       setLoading(false);
     }
@@ -39,7 +43,9 @@ export default function SupplierSetupPage() {
   useEffect(() => {
     fetchSuppliers();
   }, [fetchSuppliers]);
+  // --- AKHIR FETCH DATA ---
 
+  // --- ACTION HANDLERS (EDIT, DELETE, SUBMIT) ---
   const handleEditClick = (supplier: any) => {
     setIsEditMode(true);
     setCurrentId(supplier.id);
@@ -55,10 +61,15 @@ export default function SupplierSetupPage() {
   const handleDelete = async (id: string, name: string) => {
     if (confirm(`Hapus supplier "${name}"?`)) {
       try {
-        const res = await fetch(`${API_URL}/${id}`, { method: 'DELETE' });
-        if (res.ok) fetchSuppliers();
+        const res = await fetchApi(`/supplier/${id}`, { method: 'DELETE' });
+        if (res.ok) {
+          fetchSuppliers();
+          toast.success("Supplier berhasil dihapus");
+        } else {
+          toast.error("Gagal menghapus supplier.");
+        }
       } catch (err) {
-        console.error("Error deleting supplier", err);
+        toast.error("Terjadi kesalahan koneksi ke server.");
       }
     }
   };
@@ -74,27 +85,34 @@ export default function SupplierSetupPage() {
     e.preventDefault();
     setLoading(true);
     try {
-      const url = isEditMode ? `${API_URL}/${currentId}` : API_URL;
+      const url = isEditMode ? `/supplier/${currentId}` : '/supplier';
       const method = isEditMode ? 'PATCH' : 'POST';
-      const res = await fetch(url, {
+      
+      const res = await fetchApi(url, {
         method,
-        headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify(formData),
       });
+      
       if (res.ok) {
         closeModal();
         fetchSuppliers();
+        toast.success(isEditMode ? "Supplier berhasil diperbarui" : "Supplier berhasil ditambahkan");
+      } else {
+        const errData = await res.json();
+        toast.error(errData.message || "Gagal menyimpan data supplier.");
       }
     } catch (err) {
-      alert("Terjadi kesalahan sistem.");
+      toast.error("Terjadi kesalahan sistem.");
     } finally {
       setLoading(false);
     }
   };
+  // --- AKHIR ACTION HANDLERS ---
 
   return (
     <div className="p-4 md:p-8 max-w-[1400px] mx-auto min-h-screen">
-      {/* Header Section */}
+      
+      {/* --- HEADER SECTION --- */}
       <div className="flex flex-col md:flex-row md:items-end justify-between gap-6 mb-12">
         <div>
           <h1 className="text-3xl font-semibold text-slate-800 tracking-tight">Suppliers</h1>
@@ -120,8 +138,9 @@ export default function SupplierSetupPage() {
           </button>
         </div>
       </div>
+      {/* --- AKHIR HEADER SECTION --- */}
 
-      {/* Grid Content */}
+      {/* --- GRID CONTENT (DAFTAR SUPPLIER) --- */}
       {loading && suppliers.length === 0 ? (
         <div className="flex flex-col items-center justify-center py-32 bg-white/50 rounded-[2.5rem] border border-dashed border-slate-200">
           <Loader2 className="animate-spin text-indigo-500 mb-4" size={32} />
@@ -132,6 +151,8 @@ export default function SupplierSetupPage() {
           {suppliers
             .filter(s => s.name.toLowerCase().includes(searchTerm.toLowerCase()))
             .map((supplier) => (
+            
+            /* --- KARTU SUPPLIER --- */
             <div key={supplier.id} className="bg-white p-7 rounded-[2.5rem] border border-slate-100 shadow-sm hover:shadow-xl hover:shadow-indigo-500/5 transition-all duration-300 group relative">
               <div className="flex justify-between items-start mb-6">
                 <div className="w-14 h-14 bg-indigo-50 rounded-2xl flex items-center justify-center text-indigo-600 font-semibold text-xl group-hover:bg-indigo-600 group-hover:text-white transition-all duration-300">
@@ -160,11 +181,14 @@ export default function SupplierSetupPage() {
                 </div>
               </div>
             </div>
+            /* --- AKHIR KARTU SUPPLIER --- */
+            
           ))}
         </div>
       )}
+      {/* --- AKHIR GRID CONTENT --- */}
 
-      {/* Modal */}
+      {/* --- MODAL FORM PEMBUATAN / EDIT SUPPLIER --- */}
       {isModalOpen && (
         <div className="fixed inset-0 z-[100] flex items-center justify-center p-4">
           <div className="absolute inset-0 bg-slate-900/40 backdrop-blur-sm" onClick={closeModal} />
@@ -180,6 +204,7 @@ export default function SupplierSetupPage() {
                 <button onClick={closeModal} className="p-2 bg-slate-50 text-slate-400 rounded-full hover:bg-slate-100 transition-colors"><X size={24}/></button>
               </div>
 
+              {/* --- FORM INPUT --- */}
               <form onSubmit={handleSubmit} className="space-y-6">
                 <div>
                   <label className="text-xs font-semibold text-slate-500 ml-1">Supplier Name</label>
@@ -233,10 +258,14 @@ export default function SupplierSetupPage() {
                   {loading ? 'Processing...' : isEditMode ? 'Update Supplier' : 'Create Supplier'}
                 </button>
               </form>
+              {/* --- AKHIR FORM INPUT --- */}
+
             </div>
           </div>
         </div>
       )}
+      {/* --- AKHIR MODAL FORM --- */}
+
     </div>
   );
 }

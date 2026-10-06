@@ -8,13 +8,15 @@ import {
   Building2,
   Loader2,
   RotateCcw,
-  Tag,
   ClipboardList,
   History
 } from 'lucide-react';
 import * as XLSX from 'xlsx';
+import toast from 'react-hot-toast'; // Tambahan opsional untuk feedback yang seragam
+import { fetchApi } from '../../../utils/api'; // Menggunakan utilitas global API
 
 export default function IncomingGoodsReport() {
+  // --- STATE MANAGEMENT ---
   const [data, setData] = useState<any[]>([]);
   const [outlets, setOutlets] = useState<any[]>([]);
   const [loading, setLoading] = useState(false);
@@ -23,7 +25,12 @@ export default function IncomingGoodsReport() {
   const [selectedOutlet, setSelectedOutlet] = useState('');
   const [startDate, setStartDate] = useState('');
   const [endDate, setEndDate] = useState('');
+  
+  const [currentUser, setCurrentUser] = useState<any>(null);
+  // --- AKHIR STATE MANAGEMENT ---
 
+
+  // --- FETCH DATA (API CALLS) ---
   const fetchReport = useCallback(async (overrideOutlet?: string) => {
     setLoading(true);
     try {
@@ -33,35 +40,70 @@ export default function IncomingGoodsReport() {
       if (startDate) params.append('startDate', startDate);
       if (endDate) params.append('endDate', endDate);
 
-      const res = await fetch(`http://localhost:3000/purchasing/report/incoming?${params.toString()}`);
+      // Menggunakan fetchApi Global
+      const res = await fetchApi(`/purchasing/report/incoming?${params.toString()}`);
       const result = await res.json();
+      
+      // Safeguard untuk memastikan array
+      if (!Array.isArray(result)) {
+        setData([]);
+        return;
+      }
+
       setData(result);
     } catch (err) {
       console.error("Gagal memuat laporan", err);
+      toast.error("Koneksi gagal saat memuat laporan");
+      setData([]); 
     } finally {
-      // Delay sedikit agar transisi loading terasa smooth
       setTimeout(() => setLoading(false), 300);
     }
   }, [selectedOutlet, startDate, endDate]);
 
-  useEffect(() => {
-    fetchOutlets();
-    fetchReport();
-  }, []);
-
-  const handleOutletChange = (id: string) => {
-    setSelectedOutlet(id);
-    fetchReport(id);
+  const fetchOutlets = async () => {
+    try {
+      // Menggunakan fetchApi Global
+      const res = await fetchApi('/outlet');
+      const d = await res.json();
+      
+      if (Array.isArray(d)) {
+        setOutlets(d);
+      } else {
+        setOutlets([]);
+      }
+    } catch (err) {
+      console.error("Gagal memuat outlet", err);
+      setOutlets([]);
+    }
   };
 
-  // --- PERBAIKAN LOGIKA SUMMARY POINT 1 ---
+  useEffect(() => {
+    const userStr = localStorage.getItem('user');
+    let initialOutlet = '';
+    
+    if (userStr) {
+      const user = JSON.parse(userStr);
+      setCurrentUser(user);
+      
+      // Kunci filter jika user adalah Admin Outlet
+      if (user.role === 'ADMINOUTLET') {
+        initialOutlet = user.outletId;
+        setSelectedOutlet(user.outletId);
+      }
+    }
+
+    fetchOutlets();
+    fetchReport(initialOutlet);
+  }, [fetchReport]); 
+  // --- AKHIR FETCH DATA ---
+
+
+  // --- DATA TRANSFORMATION (SUMMARY) ---
   const summaryData = useMemo(() => {
     const summary = data.reduce((acc: any, item: any) => {
       const productName = item.product?.name || item.name;
       const sku = item.product?.sku || 'NO-SKU';
       
-      // Jika outlet dipilih, group by product DAN outlet. 
-      // Jika tidak dipilih (All), group by product saja agar tergabung.
       const key = selectedOutlet 
         ? `${sku}-${productName}-${item.purchasing?.outletId}` 
         : `${sku}-${productName}`;
@@ -70,7 +112,6 @@ export default function IncomingGoodsReport() {
         acc[key] = {
           ...item, 
           quantity: 0,
-          // Label Outlet dinamis sesuai pilihan
           displayOutletName: selectedOutlet 
             ? (item.purchasing?.outlet?.name || 'Unknown') 
             : 'ALL OUTLET'
@@ -82,22 +123,24 @@ export default function IncomingGoodsReport() {
 
     return Object.values(summary).sort((a: any, b: any) => b.quantity - a.quantity);
   }, [data, selectedOutlet]);
+  // --- AKHIR DATA TRANSFORMATION ---
 
-  const fetchOutlets = async () => {
-    try {
-      const res = await fetch('http://localhost:3000/outlet');
-      const d = await res.json();
-      setOutlets(d);
-    } catch (err) {
-      console.error("Gagal memuat outlet", err);
-    }
+
+  // --- ACTION HANDLERS ---
+  const handleOutletChange = (id: string) => {
+    setSelectedOutlet(id);
+    fetchReport(id);
   };
 
   const clearFilters = () => {
-    setSelectedOutlet('');
+    const isOutletAdmin = currentUser?.role === 'ADMINOUTLET';
+    if (!isOutletAdmin) {
+      setSelectedOutlet('');
+    }
+    
     setStartDate('');
     setEndDate('');
-    fetchReport('');
+    fetchReport(isOutletAdmin ? currentUser.outletId : '');
   };
 
   const exportToExcel = () => {
@@ -122,10 +165,13 @@ export default function IncomingGoodsReport() {
     XLSX.utils.book_append_sheet(wb, ws, activeTab === 'summary' ? "Summary" : "Detail");
     XLSX.writeFile(wb, `Report_Incoming_${activeTab}_${new Date().toISOString().split('T')[0]}.xlsx`);
   };
+  // --- AKHIR ACTION HANDLERS ---
+
 
   return (
     <div className="p-4 md:p-8 max-w-[1600px] mx-auto min-h-screen space-y-6 animate-in fade-in duration-700">
-      {/* Header & Tabs */}
+      
+      {/* --- HEADER & TABS --- */}
       <div className="flex flex-col md:flex-row md:items-center justify-between gap-4">
         <div className="space-y-1">
           <h1 className="text-2xl font-bold text-slate-800 tracking-tight">Incoming Goods Report</h1>
@@ -147,24 +193,34 @@ export default function IncomingGoodsReport() {
           </button>
         </div>
       </div>
+      {/* --- AKHIR HEADER & TABS --- */}
 
-      {/* Filter Bar */}
+
+      {/* --- FILTER BAR --- */}
       <div className="bg-white p-5 rounded-[2rem] border border-slate-100 shadow-sm flex flex-wrap items-end gap-5 transition-all duration-500 hover:shadow-md">
+        
+        {/* Dropdown Outlet */}
         <div className="flex flex-col gap-1.5">
           <label className="text-[10px] font-bold text-slate-400 uppercase tracking-widest ml-1">Outlet</label>
           <div className="relative group">
-            <Building2 className="absolute left-4 top-1/2 -translate-y-1/2 text-slate-400 group-hover:text-indigo-500 transition-colors" size={14} />
+            <Building2 className={`absolute left-4 top-1/2 -translate-y-1/2 transition-colors ${currentUser?.role === 'ADMINOUTLET' ? 'text-slate-300' : 'text-slate-400 group-hover:text-indigo-500'}`} size={14} />
             <select 
-              className="pl-10 pr-8 py-2 bg-slate-50 border border-slate-100 rounded-xl text-sm font-semibold outline-none focus:ring-4 focus:ring-indigo-500/10 focus:border-indigo-200 transition-all appearance-none cursor-pointer"
+              className={`pl-10 pr-8 py-2 border rounded-xl text-sm font-semibold outline-none transition-all appearance-none ${
+                currentUser?.role === 'ADMINOUTLET' 
+                ? 'bg-slate-100 border-transparent text-slate-500 cursor-not-allowed opacity-80' 
+                : 'bg-slate-50 border-slate-100 cursor-pointer focus:ring-4 focus:ring-indigo-500/10 focus:border-indigo-200'
+              }`}
               value={selectedOutlet}
               onChange={(e) => handleOutletChange(e.target.value)}
+              disabled={currentUser?.role === 'ADMINOUTLET'}
             >
-              <option value="">Semua Outlet</option>
+              {currentUser?.role !== 'ADMINOUTLET' && <option value="">Semua Outlet</option>}
               {outlets.map(o => <option key={o.id} value={o.id}>{o.name}</option>)}
             </select>
           </div>
         </div>
 
+        {/* Pemilihan Tanggal */}
         <div className="flex flex-col gap-1.5">
           <label className="text-[10px] font-bold text-slate-400 uppercase tracking-widest ml-1">Periode</label>
           <div className="flex items-center gap-2">
@@ -174,6 +230,7 @@ export default function IncomingGoodsReport() {
           </div>
         </div>
 
+        {/* Tombol Aksi */}
         <div className="flex items-center gap-2 ml-auto">
           <button onClick={() => fetchReport()} className="bg-slate-900 text-white px-5 py-2 rounded-xl text-sm font-bold hover:bg-indigo-600 transition-all active:scale-95 flex items-center gap-2 shadow-lg shadow-slate-200">
             <Filter size={16} /> Filter
@@ -187,8 +244,10 @@ export default function IncomingGoodsReport() {
           </button>
         </div>
       </div>
+      {/* --- AKHIR FILTER BAR --- */}
 
-      {/* Main Table Section */}
+
+      {/* --- MAIN TABLE SECTION --- */}
       <div className="bg-white rounded-[2.5rem] border border-slate-100 shadow-sm overflow-hidden transition-all duration-500">
         {loading ? (
           <div className="flex flex-col items-center justify-center py-32 animate-pulse">
@@ -198,6 +257,8 @@ export default function IncomingGoodsReport() {
         ) : (
           <div className="overflow-x-auto">
             <table className="w-full text-left border-collapse">
+              
+              {/* Table Header */}
               <thead>
                 <tr className="bg-slate-50/50 border-b border-slate-100">
                   <th className="px-6 py-5 text-[10px] font-bold text-slate-400 uppercase tracking-wider">No. SJ</th>
@@ -209,6 +270,8 @@ export default function IncomingGoodsReport() {
                   <th className="px-6 py-5 text-[10px] font-bold text-slate-400 uppercase tracking-wider">Notes</th>
                 </tr>
               </thead>
+              
+              {/* Table Body */}
               <tbody className="divide-y divide-slate-50">
                 {(activeTab === 'summary' ? summaryData : data).length > 0 ? (
                   (activeTab === 'summary' ? summaryData : data).map((item, idx) => (
@@ -273,6 +336,8 @@ export default function IncomingGoodsReport() {
           </div>
         )}
       </div>
+      {/* --- AKHIR MAIN TABLE SECTION --- */}
+      
     </div>
   );
 }

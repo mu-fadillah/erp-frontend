@@ -15,22 +15,18 @@ import {
   Building2,
   PackageSearch
 } from 'lucide-react';
+import toast from 'react-hot-toast'; // Tambahan utilitas global toast
+import { fetchApi } from '../../../utils/api'; // Menggunakan utilitas global API
 
-/* ===================================================================================
-   UI COMPONENTS IMPORT
-   Centralized components to maintain design consistency across the ERP system.
-=================================================================================== */
+/* --- UI COMPONENTS IMPORT --- */
 import PageHeader from '@/components/ui/PageHeader';
 import AnimatedWrapper from '@/components/ui/AnimatedWrapper';
 import BentoCard from '@/components/ui/BentoCard';
 import EmptyState from '@/components/ui/EmptyState';
+/* --- AKHIR UI COMPONENTS IMPORT --- */
 
 export default function PurchasingPRListPage() {
-  /* ===================================================================================
-     STATE MANAGEMENT
-     Handles core data (items, suppliers), UI states (loading, active tabs), 
-     and accordion toggles.
-  =================================================================================== */
+  // --- STATE MANAGEMENT ---
   const [prItems, setPrItems] = useState<any[]>([]);
   const [suppliers, setSuppliers] = useState<any[]>([]);
   const [loading, setLoading] = useState(true);
@@ -39,12 +35,9 @@ export default function PurchasingPRListPage() {
   const [expandedOutlets, setExpandedOutlets] = useState<Record<string, boolean>>({});
 
   const router = useRouter(); 
-  const API_URL = 'http://localhost:3000';
+  // --- AKHIR STATE MANAGEMENT ---
 
-  /* ===================================================================================
-     INITIALIZATION EFFECT
-     Fetches necessary data (suppliers and pending PRs) on component mount.
-  =================================================================================== */
+  // --- LIFECYCLE & FETCH DATA ---
   useEffect(() => {
     const initData = async () => {
       setLoading(true);
@@ -57,11 +50,49 @@ export default function PurchasingPRListPage() {
     initData();
   }, []);
 
-  /* ===================================================================================
-     DATA GROUPING LOGIC (useMemo)
-     Transforms flat PR data into a nested structure: Major Group -> Outlet -> Items[].
-     Re-calculates only when 'prItems' state changes.
-  =================================================================================== */
+  const fetchPRItems = async () => {
+    try {
+      const res = await fetchApi('/purchasing/pr/pending');
+      const data = await res.json();
+      
+      // Safeguard jika response bukan array
+      if (!Array.isArray(data)) {
+        setPrItems([]);
+        return;
+      }
+
+      setPrItems(data.map((item: any) => ({
+        ...item,
+        supplierName: item.lastSupplierName || '',
+        price: item.priceHistory?.[0]?.price || 0,
+        isChecked: false
+      })));
+    } catch (err) { 
+      toast.error("Gagal memuat Purchase Request."); 
+      setPrItems([]);
+    }
+  };
+
+  const fetchSuppliers = async () => {
+    try {
+      const res = await fetchApi('/purchasing/suppliers');
+      const data = await res.json();
+
+      // Safeguard jika response bukan array
+      if (!Array.isArray(data)) {
+        setSuppliers([]);
+        return;
+      }
+
+      setSuppliers(data);
+    } catch (err) { 
+      toast.error("Gagal memuat daftar Supplier."); 
+      setSuppliers([]);
+    }
+  };
+  // --- AKHIR LIFECYCLE & FETCH DATA ---
+
+  // --- DATA TRANSFORMATION (GROUPING BY OUTLET & DEPT) ---
   const groupedData = useMemo(() => {
     const groups: Record<string, Record<string, any[]>> = { 
       BAR: {}, 
@@ -83,36 +114,9 @@ export default function PurchasingPRListPage() {
 
     return groups;
   }, [prItems]);
+  // --- AKHIR DATA TRANSFORMATION ---
 
-  /* ===================================================================================
-     API FETCH FUNCTIONS
-     Retrieves pending purchase requests and available suppliers from the backend.
-  =================================================================================== */
-  const fetchPRItems = async () => {
-    try {
-      const res = await fetch(`${API_URL}/purchasing/pr/pending`);
-      const data = await res.json();
-      setPrItems(data.map((item: any) => ({
-        ...item,
-        supplierName: item.lastSupplierName || '',
-        price: item.priceHistory?.[0]?.price || 0,
-        isChecked: false
-      })));
-    } catch (err) { console.error("Fetch PR error:", err); }
-  };
-
-  const fetchSuppliers = async () => {
-    try {
-      const res = await fetch(`${API_URL}/purchasing/suppliers`);
-      const data = await res.json();
-      setSuppliers(data);
-    } catch (err) { console.error("Fetch Suppliers error:", err); }
-  };
-
-  /* ===================================================================================
-     TABLE INTERACTION HANDLERS
-     Functions for updating item states (checkbox, price, supplier) and accordion visibility.
-  =================================================================================== */
+  // --- ACTION HANDLERS ---
   const updateItemState = (id: string, field: string, value: any) => {
     setPrItems(prev => prev.map(item => 
       item.id === id ? { ...item, [field]: value } : item
@@ -128,24 +132,19 @@ export default function PurchasingPRListPage() {
     return val.toString().replace(/\B(?=(\d{3})+(?!\d))/g, ".");
   };
 
-  /* ===================================================================================
-     SUBMIT HANDLER
-     Validates selected items and sends bulk PO draft creation request to the API.
-  =================================================================================== */
   const handleCreatePOMassal = async () => {
     const selectedItems = prItems.filter((i: any) => i.isChecked);
     const invalidItems = selectedItems.filter(i => !i.supplierName || !i.price || i.price <= 0);
     
     if (invalidItems.length > 0) {
-      alert(`Mohon lengkapi Supplier dan Harga untuk ${invalidItems.length} item.`);
+      toast.error(`Mohon lengkapi Supplier dan Harga untuk ${invalidItems.length} item.`);
       return;
     }
 
     setActionLoading(true);
     try {
-      const res = await fetch(`${API_URL}/purchasing/po/create-massal`, {
+      const res = await fetchApi('/purchasing/po/create-massal', {
         method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ 
           items: selectedItems.map(i => ({
             id: i.id,
@@ -156,27 +155,26 @@ export default function PurchasingPRListPage() {
             price: Number(i.price),
             notes: i.notes,
             outletId: i.purchaseRequest?.outletId 
-        }))
-      }),
-    });
+          }))
+        }),
+      });
 
       if (res.ok) {
-        alert(`Sukses, item sudah di pindahkan ke draft PO.`);
+        toast.success(`Sukses, item sudah dipindahkan ke draft PO.`);
         router.push('/dashboard/purchasing/po');
       } else {
         const errData = await res.json();
-        alert(`Gagal: ${errData.message || 'Terjadi kesalahan sistem'}`);
+        toast.error(`Gagal: ${errData.message || 'Terjadi kesalahan sistem'}`);
       }
     } catch (err) { 
-      alert("Koneksi ke server terputus."); 
+      toast.error("Koneksi ke server terputus."); 
     } finally { 
       setActionLoading(false); 
     }
   };
+  // --- AKHIR ACTION HANDLERS ---
 
-  /* ===================================================================================
-     RENDER: LOADING STATE
-  =================================================================================== */
+  // --- RENDER PREPARATION ---
   if (loading) {
     return (
       <div className="flex flex-col items-center justify-center min-h-screen bg-[#F8FAFC] gap-4">
@@ -186,16 +184,10 @@ export default function PurchasingPRListPage() {
     );
   }
 
-  /* ===================================================================================
-     RENDER PREPARATION
-     Extracts data specifically for the currently active department tab.
-  =================================================================================== */
   const currentTabOutlets = groupedData[activeDepartment] || {};
   const currentTabTotalItems = Object.values(currentTabOutlets).flat().length;
+  // --- AKHIR RENDER PREPARATION ---
 
-  /* ===================================================================================
-     MAIN RENDER
-  =================================================================================== */
   return (
     <div className="min-h-screen bg-[#F8FAFC] font-sans text-slate-600 selection:bg-indigo-100">
       
@@ -204,13 +196,9 @@ export default function PurchasingPRListPage() {
         {suppliers.map((s: any) => <option key={s.id} value={s.name} />)}
       </datalist>
 
-      {/* JARAK KE TEMBOK (0,5 cm): 
-        p-4 md:p-5 memastikan jarak konsisten ~20px di atas, bawah, kiri, dan kanan. 
-        pb-24 ditambahkan agar tabel paling bawah tidak tertutup oleh tombol Floating Action (FAB). 
-      */}
       <div className="w-full p-4 md:p-5 pb-24 md:pb-24 space-y-5">
         
-        {/* === HEADER COMPONENT === */}
+        {/* --- HEADER COMPONENT --- */}
         <PageHeader 
           title="Purchase" 
           highlight="List" 
@@ -235,20 +223,22 @@ export default function PurchasingPRListPage() {
             ))}
           </div>
         </PageHeader>
+        {/* --- AKHIR HEADER COMPONENT --- */}
 
-        {/* === MAIN CONTENT WRAPPER === */}
+        {/* --- MAIN CONTENT WRAPPER --- */}
         <AnimatedWrapper delay="500">
           {currentTabTotalItems === 0 ? (
             
-             /* EMPTY STATE */
+             /* --- EMPTY STATE --- */
              <EmptyState 
                icon={<PackageSearch size={56} />} 
                title="No pending requests in this department" 
              />
+             /* --- AKHIR EMPTY STATE --- */
              
           ) : (
             
-            /* BENTO CARD CONTAINER FOR TABLES */
+            /* --- BENTO CARD CONTAINER FOR TABLES --- */
             <BentoCard noPadding>
               
               {/* Tab Title Area */}
@@ -263,7 +253,7 @@ export default function PurchasingPRListPage() {
                 </div>
               </div>
 
-              {/* Outlet Loop & Accordion Generator */}
+              {/* --- OUTLET LOOP & ACCORDION --- */}
               <div>
                 {Object.entries(currentTabOutlets).map(([outletName, items], index) => {
                   const outletIdKey = `${activeDepartment}-${outletName}`;
@@ -405,12 +395,18 @@ export default function PurchasingPRListPage() {
                   );
                 })}
               </div>
+              {/* --- AKHIR OUTLET LOOP & ACCORDION --- */}
+
             </BentoCard>
+            /* --- AKHIR BENTO CARD CONTAINER --- */
+
           )}
         </AnimatedWrapper>
+        {/* --- AKHIR MAIN CONTENT WRAPPER --- */}
+
       </div>
 
-      {/* === FLOATING ACTION MENU === */}
+      {/* --- FLOATING ACTION MENU --- */}
       {prItems.some((i: any) => i.isChecked) && (
         <div className="fixed bottom-5 right-5 md:bottom-5 md:right-5 flex items-center gap-4 bg-white p-2.5 pr-2.5 pl-5 rounded-[2rem] shadow-2xl shadow-indigo-500/20 border border-slate-100 animate-in slide-in-from-bottom-10 z-[100]">
           <div className="pr-4 border-r border-slate-100 flex flex-col justify-center">
@@ -429,6 +425,8 @@ export default function PurchasingPRListPage() {
           </button>
         </div>
       )}
+      {/* --- AKHIR FLOATING ACTION MENU --- */}
+
     </div>
   );
 }
