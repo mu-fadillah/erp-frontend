@@ -1,6 +1,7 @@
 /* eslint-disable react/no-unescaped-entities */
 /* eslint-disable @typescript-eslint/no-explicit-any */
 'use client';
+
 import { useState, useEffect, useMemo } from 'react';
 import { useRouter } from 'next/navigation';
 import { 
@@ -11,28 +12,39 @@ import {
   AlertCircle,
   History,
   Clock,
-  Building2
+  Building2,
+  PackageSearch
 } from 'lucide-react';
 
+/* ===================================================================================
+   UI COMPONENTS IMPORT
+   Centralized components to maintain design consistency across the ERP system.
+=================================================================================== */
+import PageHeader from '@/components/ui/PageHeader';
+import AnimatedWrapper from '@/components/ui/AnimatedWrapper';
+import BentoCard from '@/components/ui/BentoCard';
+import EmptyState from '@/components/ui/EmptyState';
+
 export default function PurchasingPRListPage() {
+  /* ===================================================================================
+     STATE MANAGEMENT
+     Handles core data (items, suppliers), UI states (loading, active tabs), 
+     and accordion toggles.
+  =================================================================================== */
   const [prItems, setPrItems] = useState<any[]>([]);
   const [suppliers, setSuppliers] = useState<any[]>([]);
   const [loading, setLoading] = useState(true);
   const [actionLoading, setActionLoading] = useState(false);
-  
-  // State untuk expand/collapse Department
-  const [expandedGroups, setExpandedGroups] = useState<Record<string, boolean>>({
-    BAR: true,
-    KITCHEN: true,
-    OTHER: false
-  });
-
-  // State untuk expand/collapse Outlet
+  const [activeDepartment, setActiveDepartment] = useState<string>('BAR');
   const [expandedOutlets, setExpandedOutlets] = useState<Record<string, boolean>>({});
 
   const router = useRouter(); 
   const API_URL = 'http://localhost:3000';
 
+  /* ===================================================================================
+     INITIALIZATION EFFECT
+     Fetches necessary data (suppliers and pending PRs) on component mount.
+  =================================================================================== */
   useEffect(() => {
     const initData = async () => {
       setLoading(true);
@@ -45,7 +57,11 @@ export default function PurchasingPRListPage() {
     initData();
   }, []);
 
-  // Logic grouping: Department -> Outlet -> Items
+  /* ===================================================================================
+     DATA GROUPING LOGIC (useMemo)
+     Transforms flat PR data into a nested structure: Major Group -> Outlet -> Items[].
+     Re-calculates only when 'prItems' state changes.
+  =================================================================================== */
   const groupedData = useMemo(() => {
     const groups: Record<string, Record<string, any[]>> = { 
       BAR: {}, 
@@ -68,6 +84,10 @@ export default function PurchasingPRListPage() {
     return groups;
   }, [prItems]);
 
+  /* ===================================================================================
+     API FETCH FUNCTIONS
+     Retrieves pending purchase requests and available suppliers from the backend.
+  =================================================================================== */
   const fetchPRItems = async () => {
     try {
       const res = await fetch(`${API_URL}/purchasing/pr/pending`);
@@ -89,12 +109,29 @@ export default function PurchasingPRListPage() {
     } catch (err) { console.error("Fetch Suppliers error:", err); }
   };
 
+  /* ===================================================================================
+     TABLE INTERACTION HANDLERS
+     Functions for updating item states (checkbox, price, supplier) and accordion visibility.
+  =================================================================================== */
   const updateItemState = (id: string, field: string, value: any) => {
     setPrItems(prev => prev.map(item => 
       item.id === id ? { ...item, [field]: value } : item
     ));
   };
 
+  const toggleOutlet = (outletKey: string) => {
+    setExpandedOutlets(prev => ({ ...prev, [outletKey]: !prev[outletKey] }));
+  };
+
+  const formatRupiah = (val: number | string) => {
+    if (!val || val === 0) return '';
+    return val.toString().replace(/\B(?=(\d{3})+(?!\d))/g, ".");
+  };
+
+  /* ===================================================================================
+     SUBMIT HANDLER
+     Validates selected items and sends bulk PO draft creation request to the API.
+  =================================================================================== */
   const handleCreatePOMassal = async () => {
     const selectedItems = prItems.filter((i: any) => i.isChecked);
     const invalidItems = selectedItems.filter(i => !i.supplierName || !i.price || i.price <= 0);
@@ -124,226 +161,271 @@ export default function PurchasingPRListPage() {
     });
 
       if (res.ok) {
-        alert(`Sukses, item sudah di pindahkan ke bagian PO.`);
+        alert(`Sukses, item sudah di pindahkan ke draft PO.`);
         router.push('/dashboard/purchasing/po');
       } else {
         const errData = await res.json();
         alert(`Gagal: ${errData.message || 'Terjadi kesalahan sistem'}`);
       }
     } catch (err) { 
-    alert("Koneksi ke server terputus."); 
-  } finally { 
-    setActionLoading(false); 
-  }
-};
-
-  const formatRupiah = (val: number | string) => {
-    if (!val || val === 0) return '';
-    return val.toString().replace(/\B(?=(\d{3})+(?!\d))/g, ".");
+      alert("Koneksi ke server terputus."); 
+    } finally { 
+      setActionLoading(false); 
+    }
   };
 
-  const toggleOutlet = (outletKey: string) => {
-    setExpandedOutlets(prev => ({ ...prev, [outletKey]: !prev[outletKey] }));
-  };
-
+  /* ===================================================================================
+     RENDER: LOADING STATE
+  =================================================================================== */
   if (loading) {
     return (
-      <div className="flex flex-col items-center justify-center min-h-screen bg-slate-50 gap-3">
-        <Loader2 className="animate-spin text-blue-600" size={40} />
-        <p className="text-slate-500 font-medium">Memuat Permintaan Barang...</p>
+      <div className="flex flex-col items-center justify-center min-h-screen bg-[#F8FAFC] gap-4">
+        <Loader2 className="animate-spin text-indigo-500" size={48} />
+        <p className="text-slate-400 font-medium tracking-widest uppercase text-xs">Memuat Permintaan Barang...</p>
       </div>
     );
   }
 
-  const renderDepartmentTable = (title: string, outletGroups: Record<string, any[]>, groupKey: string) => {
-    const isExpanded = expandedGroups[groupKey];
-    const totalItems = Object.values(outletGroups).flat().length;
-    if (totalItems === 0) return null;
+  /* ===================================================================================
+     RENDER PREPARATION
+     Extracts data specifically for the currently active department tab.
+  =================================================================================== */
+  const currentTabOutlets = groupedData[activeDepartment] || {};
+  const currentTabTotalItems = Object.values(currentTabOutlets).flat().length;
 
-    return (
-      <div className="mb-8 bg-white rounded-2xl border border-slate-200 shadow-sm overflow-hidden">
-        {/* Department Header */}
-        <button 
-          onClick={() => setExpandedGroups(prev => ({ ...prev, [groupKey]: !isExpanded }))}
-          className="w-full px-6 py-5 flex items-center justify-between bg-slate-50 border-b border-slate-200 hover:bg-slate-100/50 transition-colors"
-        >
-          <div className="flex items-center gap-4">
-            <div className={`w-2 h-8 rounded-full ${
-              groupKey === 'BAR' ? 'bg-blue-500' : groupKey === 'KITCHEN' ? 'bg-rose-500' : 'bg-slate-400'
-            }`} />
-            <div className="text-left">
-              <h2 className="text-lg font-black text-slate-800 tracking-tight uppercase">{title}</h2>
-              <p className="text-[11px] text-slate-500 font-bold uppercase tracking-widest">{totalItems} Total Request Items</p>
-            </div>
-          </div>
-          <ChevronDown className={`w-5 h-5 text-slate-400 transition-transform duration-300 ${isExpanded ? 'rotate-180' : ''}`} />
-        </button>
-
-        <div className={isExpanded ? 'block' : 'hidden'}>
-          {Object.entries(outletGroups).map(([outletName, items]) => {
-            const outletIdKey = `${groupKey}-${outletName}`;
-            const isOutletExpanded = expandedOutlets[outletIdKey] !== false; // Default expanded
-
-            return (
-              <div key={outletName} className="border-b border-slate-100 last:border-none">
-                {/* Outlet Sub-Header */}
-                <button 
-                  onClick={() => toggleOutlet(outletIdKey)}
-                  className="w-full px-8 py-3 flex items-center justify-between bg-white hover:bg-slate-50/50 transition-colors"
-                >
-                  <div className="flex items-center gap-3">
-                    <Building2 size={16} className="text-indigo-500" />
-                    <span className="text-sm font-bold text-slate-700 tracking-wide uppercase">Outlet: {outletName}</span>
-                    <span className="px-2 py-0.5 bg-indigo-50 text-indigo-600 text-[10px] font-bold rounded-full border border-indigo-100">
-                      {items.length} Items
-                    </span>
-                  </div>
-                  <ChevronDown size={14} className={`text-slate-400 transition-transform ${isOutletExpanded ? 'rotate-180' : ''}`} />
-                </button>
-
-                {/* Items Table per Outlet */}
-                <div className={isOutletExpanded ? 'block' : 'hidden'}>
-                  <div className="overflow-x-auto">
-                    <table className="w-full text-left border-collapse">
-                      <thead className="bg-slate-50/30 border-y border-slate-100 text-[10px] uppercase font-bold text-slate-400 tracking-widest">
-                        <tr>
-                          <th className="px-8 py-3 w-12 text-center">Select</th>
-                          <th className="px-6 py-3 w-40">Tanggal</th>
-                          <th className="px-6 py-3">Product Detail</th>
-                          <th className="px-6 py-3 text-center">Inventory</th>
-                          <th className="px-6 py-3 text-center">Req Qty</th>
-                          <th className="px-6 py-3 w-44">Price Estimate</th>
-                          <th className="px-6 py-3 w-52">Supplier Target</th>
-                        </tr>
-                      </thead>
-                      <tbody className="divide-y divide-slate-50">
-                        {items.map((item) => (
-                          <tr key={item.id} className={`group transition-all ${item.isChecked ? 'bg-blue-50/40' : 'hover:bg-slate-50/30'}`}>
-                            <td className="px-8 py-4 text-center">
-                              <input 
-                                type="checkbox" 
-                                className="w-4 h-4 rounded-md border-slate-300 text-blue-600 focus:ring-blue-500 cursor-pointer transition-transform group-hover:scale-110" 
-                                checked={item.isChecked} 
-                                onChange={() => updateItemState(item.id, 'isChecked', !item.isChecked)}
-                              />
-                            </td>
-                            <td className="px-6 py-4">
-                              <div className="flex flex-col">
-                                <span className="text-slate-700 font-bold text-[11px]">
-                                  {new Date(item.createdAt).toLocaleDateString('id-ID', { 
-                                    weekday: 'short', day: '2-digit', month: 'short', year: 'numeric' 
-                                  })}
-                                </span>
-                                <span className="text-[10px] text-blue-500 font-bold flex items-center gap-1 mt-0.5">
-                                  <Clock size={10} />
-                                  {new Date(item.createdAt).toLocaleTimeString('id-ID', { hour: '2-digit', minute: '2-digit' })}
-                                </span>
-                              </div>
-                            </td>
-                            <td className="px-6 py-4">
-                              <div className="flex flex-col">
-                                <span className="font-bold text-slate-700 text-xs uppercase">{item.product?.name}</span>
-                                <span className="text-[10px] text-slate-400 mt-1 uppercase font-medium">SKU: {item.product?.sku}</span>
-                                {item.notes && (
-                                  <div className="mt-2 flex items-start gap-1 text-[11px] text-amber-600 bg-amber-50 p-1.5 rounded-lg border border-amber-100">
-                                    <AlertCircle size={12} className="mt-0.5 shrink-0" />
-                                    <span>{item.notes}</span>
-                                  </div>
-                                )}
-                              </div>
-                            </td>
-                            <td className="px-6 py-4 text-center">
-                              <div className="inline-flex flex-col items-center px-2 py-1 bg-slate-100 rounded-lg min-w-[50px]">
-                                <span className="text-xs font-bold text-slate-600">{item.currentStock}</span>
-                                <span className="text-[9px] text-slate-400 font-bold uppercase">Stock</span>
-                              </div>
-                            </td>
-                            <td className="px-6 py-4 text-center">
-                              <div className="flex items-baseline justify-center gap-1">
-                                <span className="text-sm font-black text-slate-800">{item.quantity}</span>
-                                <span className="text-[10px] font-bold text-slate-400 uppercase">{item.uom}</span>
-                              </div>
-                            </td>
-                            <td className="px-6 py-4">
-                              <div className="relative">
-                                <span className="absolute left-3 top-1/2 -translate-y-1/2 text-[10px] font-bold text-slate-400">Rp</span>
-                                <input 
-                                  type="text" 
-                                  className="w-full pl-8 pr-3 py-2 bg-white border border-slate-200 rounded-xl text-xs font-bold text-slate-700 focus:border-blue-500 focus:ring-4 focus:ring-blue-500/10 outline-none transition-all shadow-sm"
-                                  placeholder="0"
-                                  value={formatRupiah(item.price)}
-                                  onChange={(e) => updateItemState(item.id, 'price', e.target.value.replace(/\./g, ''))}
-                                />
-                              </div>
-                              {item.priceHistory?.length > 0 && (
-                                <div className="mt-1.5 flex items-center gap-1 text-[9px] text-slate-400 italic">
-                                  <History size={10} />
-                                  Last: Rp {formatRupiah(item.priceHistory[0].price)}
-                                </div>
-                              )}
-                            </td>
-                            <td className="px-6 py-4">
-                              <input 
-                                list="supplier-options" 
-                                className="w-full px-3 py-2 bg-white border border-slate-200 rounded-xl text-xs font-medium text-slate-700 focus:border-blue-500 focus:ring-4 focus:ring-blue-500/10 outline-none transition-all shadow-sm"
-                                placeholder="Pilih Supplier..."
-                                value={item.supplierName}
-                                onChange={(e) => updateItemState(item.id, 'supplierName', e.target.value)}
-                              />
-                            </td>
-                          </tr>
-                        ))}
-                      </tbody>
-                    </table>
-                  </div>
-                </div>
-              </div>
-            );
-          })}
-        </div>
-      </div>
-    );
-  };
-
+  /* ===================================================================================
+     MAIN RENDER
+  =================================================================================== */
   return (
-    <div className="p-8 max-w-[1600px] mx-auto bg-slate-50 min-h-screen">
+    <div className="min-h-screen bg-[#F8FAFC] font-sans text-slate-600 selection:bg-indigo-100">
+      
+      {/* Hidden datalist for supplier autocomplete */}
       <datalist id="supplier-options">
         {suppliers.map((s: any) => <option key={s.id} value={s.name} />)}
       </datalist>
 
-      <div className="flex justify-between items-end mb-10">
-        <div className="space-y-1">
-          <div className="flex items-center gap-2 text-blue-600 mb-2">
-            <div className="bg-blue-600 p-1.5 rounded-lg">
-              <ShoppingCart size={16} className="text-white" />
-            </div>
-            <span className="text-[11px] font-black uppercase tracking-[0.2em]">Supply Chain Management</span>
+      {/* JARAK KE TEMBOK (0,5 cm): 
+        p-4 md:p-5 memastikan jarak konsisten ~20px di atas, bawah, kiri, dan kanan. 
+        pb-24 ditambahkan agar tabel paling bawah tidak tertutup oleh tombol Floating Action (FAB). 
+      */}
+      <div className="w-full p-4 md:p-5 pb-24 md:pb-24 space-y-5">
+        
+        {/* === HEADER COMPONENT === */}
+        <PageHeader 
+          title="Purchase" 
+          highlight="List" 
+          description="Review outlet requests, assign suppliers, and create draft purchase orders efficiently."
+          moduleName="Supply Chain Management"
+          icon={<ShoppingCart size={14} className="text-indigo-600" />}
+        >
+          <div className="flex bg-slate-200/50 p-1.5 rounded-xl h-fit shadow-inner overflow-x-auto hide-scrollbar">
+            {['BAR', 'KITCHEN', 'OTHER'].map((dept) => (
+              <button 
+                key={dept}
+                onClick={() => setActiveDepartment(dept)} 
+                className={`flex items-center gap-2 px-6 py-2.5 rounded-lg text-xs font-semibold transition-all duration-300 whitespace-nowrap ${
+                  activeDepartment === dept ? 'bg-white text-indigo-600 shadow-sm translate-y-[-1px]' : 'text-slate-500 hover:text-slate-800'
+                }`}
+              >
+                {dept === 'BAR' && <div className="w-1.5 h-1.5 rounded-full bg-blue-500"></div>}
+                {dept === 'KITCHEN' && <div className="w-1.5 h-1.5 rounded-full bg-rose-500"></div>}
+                {dept === 'OTHER' && <div className="w-1.5 h-1.5 rounded-full bg-slate-400"></div>}
+                {dept === 'OTHER' ? 'GENERAL & OTHERS' : `${dept} DEPARTMENT`}
+              </button>
+            ))}
           </div>
-          <h1 className="text-3xl font-black text-slate-900 tracking-tight">Purchase Request</h1>
-          <p className="text-sm text-slate-500 font-medium">Review outlet requests and create draft purchase orders.</p>
-        </div>
+        </PageHeader>
+
+        {/* === MAIN CONTENT WRAPPER === */}
+        <AnimatedWrapper delay="500">
+          {currentTabTotalItems === 0 ? (
+            
+             /* EMPTY STATE */
+             <EmptyState 
+               icon={<PackageSearch size={56} />} 
+               title="No pending requests in this department" 
+             />
+             
+          ) : (
+            
+            /* BENTO CARD CONTAINER FOR TABLES */
+            <BentoCard noPadding>
+              
+              {/* Tab Title Area */}
+              <div className="px-6 py-5 border-b border-slate-100 flex justify-between items-center bg-slate-50/30">
+                <div>
+                  <h3 className="text-lg font-light text-slate-900 tracking-tight">
+                    {activeDepartment === 'OTHER' ? 'General' : activeDepartment} <span className="font-medium">Requests</span>
+                  </h3>
+                  <p className="text-[10px] text-slate-400 font-medium uppercase tracking-[0.1em]">
+                    {currentTabTotalItems} items need processing
+                  </p>
+                </div>
+              </div>
+
+              {/* Outlet Loop & Accordion Generator */}
+              <div>
+                {Object.entries(currentTabOutlets).map(([outletName, items], index) => {
+                  const outletIdKey = `${activeDepartment}-${outletName}`;
+                  const isOutletExpanded = expandedOutlets[outletIdKey] !== false;
+
+                  return (
+                    <div key={outletName} className={`border-b border-slate-100 ${index % 2 === 0 ? 'bg-white' : 'bg-slate-50/30'}`}>
+                      
+                      {/* Accordion Toggle Button */}
+                      <button 
+                        onClick={() => toggleOutlet(outletIdKey)}
+                        className="w-full px-6 py-4 flex items-center justify-between hover:bg-indigo-50/30 transition-colors group"
+                      >
+                        <div className="flex items-center gap-3">
+                          <div className="bg-white p-2 rounded-lg border border-slate-200/60 shadow-sm group-hover:border-indigo-200 transition-colors">
+                            <Building2 size={14} className="text-indigo-500" />
+                          </div>
+                          <span className="text-sm font-semibold text-slate-800 uppercase tracking-wide">
+                            {outletName}
+                          </span>
+                          <span className="px-2.5 py-0.5 bg-slate-100 text-slate-500 text-[10px] font-semibold rounded-full border border-slate-200 uppercase tracking-widest">
+                            {items.length} Items
+                          </span>
+                        </div>
+                        <ChevronDown size={16} className={`text-slate-300 transition-transform duration-300 ${isOutletExpanded ? 'rotate-180 text-indigo-400' : ''}`} />
+                      </button>
+
+                      {/* Outlet Items Table */}
+                      <div className={`overflow-hidden transition-all duration-300 ${isOutletExpanded ? 'max-h-[5000px] opacity-100' : 'max-h-0 opacity-0'}`}>
+                        <div className="overflow-x-auto px-6 pb-6 pt-1">
+                          <table className="w-full text-left border-separate border-spacing-y-2">
+                            <thead>
+                              <tr className="text-[10px] uppercase font-semibold text-slate-400 tracking-[0.2em] opacity-80">
+                                <th className="px-3 pb-2 w-10 text-center">Select</th>
+                                <th className="px-4 pb-2 w-36">Request Date</th>
+                                <th className="px-4 pb-2">Product Info</th>
+                                <th className="px-3 pb-2 text-center w-16">Stock</th>
+                                <th className="px-3 pb-2 text-center w-20">Req Qty</th>
+                                <th className="px-4 pb-2 w-44">Price Est.</th>
+                                <th className="px-4 pb-2 w-52">Supplier target</th>
+                              </tr>
+                            </thead>
+                            <tbody>
+                              {items.map((item) => (
+                                <tr key={item.id} className={`group transition-all duration-300 ${item.isChecked ? 'bg-indigo-50/50 shadow-sm shadow-indigo-100' : 'bg-white hover:bg-slate-50/50'}`}>
+                                  
+                                  {/* Checkbox Column */}
+                                  <td className={`px-3 py-3.5 text-center rounded-l-lg border-y border-l transition-colors ${item.isChecked ? 'border-indigo-200' : 'border-slate-200 group-hover:border-indigo-100'}`}>
+                                    <div className="relative flex items-center justify-center">
+                                      <input 
+                                        type="checkbox" 
+                                        className="w-4 h-4 rounded border-slate-300 text-indigo-600 focus:ring-indigo-500/20 cursor-pointer accent-indigo-600 transition-all" 
+                                        checked={item.isChecked} 
+                                        onChange={() => updateItemState(item.id, 'isChecked', !item.isChecked)}
+                                      />
+                                    </div>
+                                  </td>
+                                  
+                                  {/* Date Column */}
+                                  <td className={`px-4 py-3.5 border-y transition-colors ${item.isChecked ? 'border-indigo-200' : 'border-slate-200 group-hover:border-indigo-100'}`}>
+                                    <div className="flex flex-col space-y-0.5">
+                                      <span className="text-slate-700 font-medium text-xs">
+                                        {new Date(item.createdAt).toLocaleDateString('id-ID', { day: '2-digit', month: 'short', year: 'numeric' })}
+                                      </span>
+                                      <span className="text-[10px] text-slate-400 font-medium flex items-center gap-1">
+                                        <Clock size={10} />
+                                        {new Date(item.createdAt).toLocaleTimeString('id-ID', { hour: '2-digit', minute: '2-digit' })}
+                                      </span>
+                                    </div>
+                                  </td>
+
+                                  {/* Product Info Column */}
+                                  <td className={`px-4 py-3.5 border-y transition-colors ${item.isChecked ? 'border-indigo-200' : 'border-slate-200 group-hover:border-indigo-100'}`}>
+                                    <div className="flex flex-col">
+                                      <span className="font-semibold text-slate-800 text-sm leading-tight">{item.product?.name}</span>
+                                      <span className="text-[9px] text-slate-400 mt-0.5 uppercase font-medium tracking-widest">SKU: {item.product?.sku || '-'}</span>
+                                      {item.notes && (
+                                        <div className="mt-2 flex items-start gap-1.5 text-[10px] text-amber-600 bg-amber-50 p-1.5 rounded-md border border-amber-100/50">
+                                          <AlertCircle size={12} className="shrink-0" />
+                                          <span className="font-medium">{item.notes}</span>
+                                        </div>
+                                      )}
+                                    </div>
+                                  </td>
+
+                                  {/* Current Stock Column */}
+                                  <td className={`px-3 py-3.5 text-center border-y transition-colors ${item.isChecked ? 'border-indigo-200' : 'border-slate-200 group-hover:border-indigo-100'}`}>
+                                    <div className="inline-flex flex-col items-center px-2.5 py-1 bg-slate-50 border border-slate-100 rounded-md min-w-[36px]">
+                                      <span className="text-sm font-semibold text-slate-600">{item.currentStock}</span>
+                                    </div>
+                                  </td>
+
+                                  {/* Quantity Column */}
+                                  <td className={`px-3 py-3.5 text-center border-y transition-colors ${item.isChecked ? 'border-indigo-200' : 'border-slate-200 group-hover:border-indigo-100'}`}>
+                                    <div className="flex flex-col items-center justify-center">
+                                      <span className="text-sm font-semibold text-slate-900">{item.quantity}</span>
+                                      <span className="text-[9px] font-semibold text-slate-400 uppercase tracking-widest">{item.uom}</span>
+                                    </div>
+                                  </td>
+
+                                  {/* Price Estimate Column */}
+                                  <td className={`px-4 py-3.5 border-y transition-colors ${item.isChecked ? 'border-indigo-200' : 'border-slate-200 group-hover:border-indigo-100'}`}>
+                                    <div className="relative">
+                                      <span className="absolute left-3 top-1/2 -translate-y-1/2 text-[10px] font-medium text-slate-400">Rp</span>
+                                      <input 
+                                        type="text" 
+                                        className="w-full pl-8 pr-3 py-2 bg-slate-50 border border-slate-200 rounded-lg text-xs font-semibold text-indigo-700 focus:bg-white focus:border-indigo-400 focus:ring-2 focus:ring-indigo-500/20 outline-none transition-all"
+                                        placeholder="0"
+                                        value={formatRupiah(item.price)}
+                                        onChange={(e) => updateItemState(item.id, 'price', e.target.value.replace(/\./g, ''))}
+                                      />
+                                    </div>
+                                    {item.priceHistory?.length > 0 && (
+                                      <div className="mt-1.5 flex items-center gap-1 text-[9px] text-slate-400 font-medium">
+                                        <History size={10} />
+                                        Last: Rp {formatRupiah(item.priceHistory[0].price)}
+                                      </div>
+                                    )}
+                                  </td>
+
+                                  {/* Supplier Input Column */}
+                                  <td className={`px-4 py-3.5 rounded-r-lg border-y border-r transition-colors ${item.isChecked ? 'border-indigo-200' : 'border-slate-200 group-hover:border-indigo-100'}`}>
+                                    <input 
+                                      list="supplier-options" 
+                                      className="w-full px-3 py-2 bg-slate-50 border border-slate-200 rounded-lg text-xs font-medium text-slate-700 focus:bg-white focus:border-indigo-400 focus:ring-2 focus:ring-indigo-500/20 outline-none transition-all placeholder:text-slate-400"
+                                      placeholder="Assign supplier..."
+                                      value={item.supplierName}
+                                      onChange={(e) => updateItemState(item.id, 'supplierName', e.target.value)}
+                                    />
+                                  </td>
+
+                                </tr>
+                              ))}
+                            </tbody>
+                          </table>
+                        </div>
+                      </div>
+                    </div>
+                  );
+                })}
+              </div>
+            </BentoCard>
+          )}
+        </AnimatedWrapper>
       </div>
 
-      <div className="space-y-8">
-        {renderDepartmentTable('Bar Department', groupedData.BAR, 'BAR')}
-        {renderDepartmentTable('Kitchen Department', groupedData.KITCHEN, 'KITCHEN')}
-        {renderDepartmentTable('General & Others', groupedData.OTHER, 'OTHER')}
-      </div>
-
-      {/* Floating Action Menu */}
+      {/* === FLOATING ACTION MENU === */}
       {prItems.some((i: any) => i.isChecked) && (
-        <div className="fixed bottom-10 right-10 flex items-center gap-4 bg-slate-900 p-4 rounded-3xl shadow-[0_20px_50px_rgba(0,0,0,0.3)] border border-slate-800 animate-in slide-in-from-bottom-10">
-          <div className="px-4 border-r border-slate-700">
-            <p className="text-[10px] text-slate-400 font-bold uppercase tracking-wider">Selected Items</p>
-            <p className="text-xl font-black text-white">{prItems.filter(i => i.isChecked).length}</p>
+        <div className="fixed bottom-5 right-5 md:bottom-5 md:right-5 flex items-center gap-4 bg-white p-2.5 pr-2.5 pl-5 rounded-[2rem] shadow-2xl shadow-indigo-500/20 border border-slate-100 animate-in slide-in-from-bottom-10 z-[100]">
+          <div className="pr-4 border-r border-slate-100 flex flex-col justify-center">
+            <p className="text-[9px] text-slate-400 font-semibold uppercase tracking-[0.2em] mb-0.5">Ready to draft</p>
+            <p className="text-lg font-bold text-indigo-600 leading-none">
+              {prItems.filter(i => i.isChecked).length} <span className="text-xs text-slate-400 font-medium">items</span>
+            </p>
           </div>
           <button 
             onClick={handleCreatePOMassal} 
             disabled={actionLoading}
-            className="flex items-center gap-3 bg-blue-600 hover:bg-blue-500 text-white px-8 py-4 rounded-2xl font-bold text-sm transition-all active:scale-95 disabled:opacity-50 group"
+            className="flex items-center gap-2 bg-slate-900 hover:bg-indigo-600 text-white px-6 py-2.5 rounded-[1.5rem] font-semibold text-xs uppercase tracking-widest transition-all active:scale-95 disabled:opacity-50 shadow-lg shadow-slate-900/20"
           >
-            {actionLoading ? <Loader2 className="animate-spin" size={18} /> : <CheckCircle2 size={18} />}
-            {actionLoading ? 'Creating Drafts...' : 'Create Mass PO Draft'}
+            {actionLoading ? <Loader2 className="animate-spin" size={16} /> : <CheckCircle2 size={16} />}
+            {actionLoading ? 'Processing...' : 'Create PO Draft'}
           </button>
         </div>
       )}

@@ -158,7 +158,7 @@ export default function DashboardLayout({ children }: { children: React.ReactNod
           </div>
           {isSidebarOpen && (
             <div className="ml-4 overflow-hidden">
-              <h1 className="text-sm font-black tracking-widest text-white uppercase">CAMDEN</h1>
+              <h1 className="text-sm font-black tracking-widest text-white uppercase">LookDeep</h1>
               <p className="text-[9px] font-bold text-indigo-400 tracking-tighter uppercase">Inventory System</p>
             </div>
           )}

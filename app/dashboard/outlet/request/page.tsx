@@ -1,3 +1,4 @@
+/* eslint-disable react/no-unescaped-entities */
 /* eslint-disable @typescript-eslint/no-explicit-any */
 'use client';
 
@@ -6,14 +7,27 @@ import {
   Search, Plus, History, ClipboardList, Download, 
   Table as TableIcon, FileText, RefreshCw, X, ChevronDown,
   PackageCheck, Clock, ShoppingCart, CheckCircle2,
-  Calendar, Building2, MapPin, FileCheck, FilterX,
+  Calendar, Building2, FileCheck, FilterX,
   FileUp, AlertCircle, FileSpreadsheet, Loader2
 } from 'lucide-react';
 import * as XLSX from 'xlsx';
 import jsPDF from 'jspdf';
 import 'jspdf-autotable';
 
+/* ===================================================================================
+   UI COMPONENTS IMPORT
+   Centralized components to maintain design consistency across the ERP system.
+=================================================================================== */
+import PageHeader from '@/components/ui/PageHeader';
+import AnimatedWrapper from '@/components/ui/AnimatedWrapper';
+import BentoCard from '@/components/ui/BentoCard';
+import EmptyState from '@/components/ui/EmptyState';
+
 export default function AdminOutletRequestPage() {
+  /* ===================================================================================
+     STATE MANAGEMENT
+     Handles core data, form arrays, active tabs, and temporary UI states.
+  =================================================================================== */
   const [activeTab, setActiveTab] = useState<'form' | 'history'>('form');
   const [products, setProducts] = useState<any[]>([]);
   const [itemGroups, setItemGroups] = useState<any[]>([]);
@@ -24,81 +38,80 @@ export default function AdminOutletRequestPage() {
   const [cart, setCart] = useState<any[]>([]);
   const [loading, setLoading] = useState(false);
   const [showExportMenu, setShowExportMenu] = useState(false);
+  const [showImportMenu, setShowImportMenu] = useState(false);
   const [notification, setNotification] = useState<{message: string, type: 'success' | 'error'} | null>(null);
-  const [importSuggestions, setImportSuggestions] = useState<any[]>([]); // Untuk menyimpan item yang butuh konfirmasi
+  const [importSuggestions, setImportSuggestions] = useState<any[]>([]); 
   
-  // Refs for Import/Export
   const exportMenuRef = useRef<HTMLDivElement>(null);
+  const importMenuRef = useRef<HTMLDivElement>(null);
   const fileInputRef = useRef<HTMLInputElement>(null);
 
-  const initialFilters = {
-    startDate: '',
-    endDate: '',
-    searchTerm: '',
-    status: 'ALL',
-    itemGroupId: 'ALL'
-  };
-
+  const initialFilters = { startDate: '', endDate: '', searchTerm: '', status: 'ALL', itemGroupId: 'ALL' };
   const [filters, setFilters] = useState(initialFilters);
   const API_URL = 'http://localhost:3000'; 
 
+  /* ===================================================================================
+     LIFECYCLE EFFECTS
+     Initializes data and event listeners (e.g., clicking outside dropdowns).
+  =================================================================================== */
   useEffect(() => {
     fetchData();
     const handleClickOutside = (event: MouseEvent) => {
       if (exportMenuRef.current && !exportMenuRef.current.contains(event.target as Node)) {
         setShowExportMenu(false);
       }
+      if (importMenuRef.current && !importMenuRef.current.contains(event.target as Node)) {
+        setShowImportMenu(false);
+      }
     };
     document.addEventListener('mousedown', handleClickOutside);
     return () => document.removeEventListener('mousedown', handleClickOutside);
   }, []);
 
+  useEffect(() => { 
+    if (activeTab === 'history') fetchHistory(); 
+  }, [activeTab]);
+
+  /* ===================================================================================
+     DATA FETCHERS
+     Retrieves base products, groups, outlets, and historical PR data from the API.
+  =================================================================================== */
   const fetchData = async () => {
     try {
       const [prodRes, groupRes, outletRes] = await Promise.all([
-        fetch(`${API_URL}/product`),
-        fetch(`${API_URL}/item-group`),
-        fetch(`${API_URL}/outlet`) 
+        fetch(`${API_URL}/product`), fetch(`${API_URL}/item-group`), fetch(`${API_URL}/outlet`) 
       ]);
       setProducts(await prodRes.json());
       setItemGroups(await groupRes.json());
       setOutlets(await outletRes.json());
-    } catch (err) {
-      console.error("Fetch error:", err);
-    }
+    } catch (err) { console.error("Fetch error:", err); }
   };
-
-  useEffect(() => {
-    if (activeTab === 'history') fetchHistory();
-  }, [activeTab]);
 
   const fetchHistory = async () => {
     setLoading(true);
     try {
-      const res = await fetch(`${API_URL}/purchasing/pr/history?t=${Date.now()}`, {
-        cache: 'no-store'
-      });
+      const res = await fetch(`${API_URL}/purchasing/pr/history?t=${Date.now()}`, { cache: 'no-store' });
       const data = await res.json();
       setHistoryItems(Array.isArray(data) ? data : []);
-    } catch (err) {
-      console.error("Error fetching PR history:", err);
+    } catch (err) { 
+      console.error("Error fetching PR history:", err); 
       setHistoryItems([]); 
-    } finally {
-      setLoading(false);
+    } finally { 
+      setLoading(false); 
     }
   };
 
+  /* ===================================================================================
+     UTILITIES & HELPERS
+     Toast notifications, similarity scoring for Excel uploads, and data sanitization.
+  =================================================================================== */
   const showNotif = (message: string, type: 'success' | 'error' = 'success') => {
     setNotification({ message, type });
-    setTimeout(() => setNotification(null), 3000); // Hilang otomatis dalam 3 detik
+    setTimeout(() => setNotification(null), 3000);
   };
 
-  // --- GLOBAL CONFIG & UTILS ---
   const PRODUCT_ALIASES: Record<string, string> = {
-    'COKE': 'COLA',
-    'COCA COLA': 'COLA',
-    'JACK D': 'JACK DANIELS',
-    'JAGER': 'JAGERMEISTER'
+    'COKE': 'COLA', 'COCA COLA': 'COLA', 'JACK D': 'JACK DANIELS', 'JAGER': 'JAGERMEISTER'
   };
 
   const sanitize = (str: string) => str.toUpperCase().replace(/\s+/g, ' ').trim();
@@ -106,45 +119,36 @@ export default function AdminOutletRequestPage() {
   const getSimilarityScore = (importName: string, dbName: string) => {
     const s1 = sanitize(importName);
     const s2 = sanitize(dbName);
-    
     const aliasName = PRODUCT_ALIASES[s1];
     if (aliasName === s2 || s1 === s2) return 1.0; 
-
     const getGrams = (s: string) => {
       const grams = [];
       for (let i = 0; i < s.length - 1; i++) grams.push(s.substring(i, i + 2));
       return grams;
     };
-
     const g1 = getGrams(s1);
     const g2 = getGrams(s2);
     const intersection = g1.filter(x => g2.includes(x)).length;
     const total = g1.length + g2.length;
-    
     return total === 0 ? 0 : (2.0 * intersection) / total;
   };
 
-  // --- FITUR DOWNLOAD TEMPLATE ---
+  /* ===================================================================================
+     EXCEL IMPORT LOGIC
+     Handles template generation, file reading, and Smart Name Matching logic.
+  =================================================================================== */
   const handleDownloadTemplate = () => {
-    const templateData = [
-      {
-        'Nama Barang': 'JAGERMEISTER 700ML',
-        'Quantity': 5,
-        'Satuan': 'BTL',
-        'Catatan': 'Segera dikirim'
-      }
-    ];
+    const templateData = [{ 'Nama Barang': 'JAGERMEISTER 700ML', 'Quantity': 5, 'Satuan': 'BTL', 'Catatan': 'Segera dikirim' }];
     const ws = XLSX.utils.json_to_sheet(templateData);
     const wb = XLSX.utils.book_new();
     XLSX.utils.book_append_sheet(wb, ws, "Template_Request");
     XLSX.writeFile(wb, "Template_Purchase_Request.xlsx");
+    setShowImportMenu(false);
   };
 
-  // --- FITUR IMPORT EXCEL ---
   const handleImportExcel = (e: React.ChangeEvent<HTMLInputElement>) => {
     const file = e.target.files?.[0];
     if (!file) return;
-
     const reader = new FileReader();
     reader.onload = (evt) => {
       try {
@@ -158,52 +162,63 @@ export default function AdminOutletRequestPage() {
         const newSuggestions: any[] = [];
         const confirmedItems: any[] = [];
 
-        data.forEach((row: any, index: number) => {
+        data.forEach((row: any) => {
           const rowName = row['Nama Barang'] || '';
           let bestMatch: any = null;
           let highestScore = 0;
-
           products.forEach(p => {
             const score = getSimilarityScore(rowName, p.name);
-            if (score > highestScore) {
-              highestScore = score;
-              bestMatch = p;
-            }
+            if (score > highestScore) { highestScore = score; bestMatch = p; }
           });
-
-          const itemBase = {
-            name: rowName,
-            quantity: Number(row['Quantity']) || 1,
-            uom: row['Satuan'] || 'PCS',
-            notes: row['Catatan'] || ''
-          };
-
-          // AMBANG BATAS BARU
+          const itemBase = { name: rowName, quantity: Number(row['Quantity']) || 1, uom: row['Satuan'] || 'PCS', notes: row['Catatan'] || '' };
+          
           if (highestScore > 0.85) {
-            // Dianggap sama (termasuk BACARDI WHITE yang beda spasi)
-            confirmedItems.push({ ...itemBase, productId: bestMatch.id, itemGroupName: bestMatch.itemGroup?.name });
+            confirmedItems.push({ ...itemBase, productId: bestMatch.id, itemGroupId: bestMatch.itemGroupId, itemGroupName: bestMatch.itemGroup?.name, uom: bestMatch.uom, isNew: false });
           } else if (highestScore > 0.25) {
-            // COKE ke COLA akan masuk ke sini karena skornya sekitar 0.3 - 0.4
             newSuggestions.push({ ...itemBase, suggestion: bestMatch, score: Math.round(highestScore * 100) });
           } else {
-            confirmedItems.push({ ...itemBase, productId: null, itemGroupName: 'Manual' });
+            confirmedItems.push({ ...itemBase, productId: null, itemGroupId: '', isNew: true });
           }
         });
-
-        setCart([...cart, ...confirmedItems]);
-        if (newSuggestions.length > 0) {
-          setImportSuggestions(newSuggestions); // Munculkan modal/notif saran
-        } else {
-          showNotif(`Berhasil mengimpor ${confirmedItems.length} item`);
-        }
-      } catch (err) {
-        showNotif("Gagal memproses Excel", "error");
-      } finally {
-        if (fileInputRef.current) fileInputRef.current.value = '';
+        
+        setCart(prev => [...prev, ...confirmedItems]);
+        setShowImportMenu(false);
+        
+        if (newSuggestions.length > 0) setImportSuggestions(newSuggestions);
+        else showNotif(`Berhasil mengimpor ${confirmedItems.length} item`);
+        
+      } catch (err) { 
+        showNotif("Gagal memproses Excel", "error"); 
+      } finally { 
+        if (fileInputRef.current) fileInputRef.current.value = ''; 
       }
     };
     reader.readAsBinaryString(file);
   };
+
+  /* ===================================================================================
+     HISTORY MEMOIZATION & EXPORTS
+     Filters the history data based on active states and manages Excel/PDF exports.
+  =================================================================================== */
+  const filteredHistory = useMemo(() => {
+    const filtered = historyItems.filter((item: any) => {
+      const prod = item.product || {};
+      const itemName = (prod.name || item.tempProductName || '').toLowerCase();
+      const itemDate = new Date(item.createdAt).toISOString().split('T')[0];
+      const matchSearch = itemName.includes(filters.searchTerm.toLowerCase());
+      const matchStatus = filters.status === 'ALL' || item.status === filters.status;
+      const matchGroup = filters.itemGroupId === 'ALL' || prod.itemGroupId === filters.itemGroupId;
+      const matchStart = !filters.startDate || itemDate >= filters.startDate;
+      const matchEnd = !filters.endDate || itemDate <= filters.endDate;
+      return matchSearch && matchStatus && matchGroup && matchStart && matchEnd;
+    });
+    return filtered.sort((a, b) => {
+      const outletA = (a.purchaseRequest?.outlet?.name || 'Z-Tanpa Nama').toLowerCase();
+      const outletB = (b.purchaseRequest?.outlet?.name || 'Z-Tanpa Nama').toLowerCase();
+      if (outletA !== outletB) return outletA.localeCompare(outletB);
+      return new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime();
+    });
+  }, [historyItems, filters]);
 
   const exportToExcel = () => {
     const dataToExport = filteredHistory.map(item => ({
@@ -239,11 +254,7 @@ export default function AdminOutletRequestPage() {
     ]);
 
     (doc as any).autoTable({
-      head: [tableColumn],
-      body: tableRows,
-      startY: 20,
-      styles: { fontSize: 8 },
-      headStyles: { fillColor: [15, 23, 42] }
+      head: [tableColumn], body: tableRows, startY: 20, styles: { fontSize: 8 }, headStyles: { fillColor: [15, 23, 42] }
     });
 
     doc.setFontSize(14);
@@ -252,85 +263,58 @@ export default function AdminOutletRequestPage() {
     setShowExportMenu(false);
   };
 
-  const filteredHistory = useMemo(() => {
-    const filtered = historyItems.filter((item: any) => {
-      const prod = item.product || {};
-      const itemName = (prod.name || item.tempProductName || '').toLowerCase();
-      const itemDate = new Date(item.createdAt).toISOString().split('T')[0];
-      const matchSearch = itemName.includes(filters.searchTerm.toLowerCase());
-      const matchStatus = filters.status === 'ALL' || item.status === filters.status;
-      const matchGroup = filters.itemGroupId === 'ALL' || prod.itemGroupId === filters.itemGroupId;
-      const matchStart = !filters.startDate || itemDate >= filters.startDate;
-      const matchEnd = !filters.endDate || itemDate <= filters.endDate;
-      return matchSearch && matchStatus && matchGroup && matchStart && matchEnd;
-    });
-    return filtered.sort((a, b) => {
-      const outletA = (a.purchaseRequest?.outlet?.name || 'Z-Tanpa Nama').toLowerCase();
-      const outletB = (b.purchaseRequest?.outlet?.name || 'Z-Tanpa Nama').toLowerCase();
-      if (outletA !== outletB) return outletA.localeCompare(outletB);
-      return new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime();
-    });
-  }, [historyItems, filters]);
-
   const clearFilters = () => {
-  setFilters({
-    startDate: '',
-    endDate: '',
-    searchTerm: '',
-    status: 'ALL',
-    itemGroupId: 'ALL'
-  }); // Mengembalikan state filters ke nilai awal secara manual
-};
+    setFilters({ startDate: '', endDate: '', searchTerm: '', status: 'ALL', itemGroupId: 'ALL' });
+  };
 
-  // Tambahkan flag isNew untuk item manual
+  /* ===================================================================================
+     FORM SUBMISSION & CART LOGIC
+     Adds items manually, formats data, and POSTs the final request array.
+  =================================================================================== */
   const addToCart = (product?: any) => {
     const newItem = product ? {
-      productId: product.id, 
-      name: product.name, 
-      itemGroupId: product.itemGroupId,
-      itemGroupName: product.itemGroup?.name || 'Umum',
-      uom: product.uom || 'PCS', 
-      quantity: 1, 
-      notes: '',
-      isNew: false // Item sudah ada di database
+      productId: product.id, name: product.name, itemGroupId: product.itemGroupId, itemGroupName: product.itemGroup?.name || 'Umum',
+      uom: product.uom || 'PCS', quantity: 1, notes: '', isNew: false 
     } : {
-      productId: null,
-      name: searchTerm, 
-      itemGroupId: '',
-      itemGroupName: '',
-      uom: 'PCS', 
-      quantity: 1, 
-      notes: '',
-      isNew: true // Tandai sebagai item baru yang perlu disimpan
+      productId: null, name: searchTerm, itemGroupId: '', itemGroupName: '', uom: 'PCS', quantity: 1, notes: '', isNew: true 
     };
     setCart([...cart, newItem]);
     setSearchTerm('');
   };
 
   const handleSendRequest = async () => {
-    if (cart.length === 0) return;
-    if (!selectedOutletId) {
-        alert("Pilih outlet terlebih dahulu!");
-        return;
-    }
+    if (cart.length === 0 || !selectedOutletId) return alert("Pilih outlet dan item yang ingin dipesan!");
+    
+    const cleanedItems = cart.map(item => ({
+      productId: item.productId || undefined, name: item.name, quantity: Number(item.quantity), uom: item.uom,
+      itemGroupName: item.itemGroupName || 'Umum', itemGroupId: item.itemGroupId || undefined, notes: item.notes || ''
+    }));
+
     setLoading(true);
     try {
       const response = await fetch(`${API_URL}/purchasing/pr/create`, {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ outletId: selectedOutletId, items: cart }),
+        method: 'POST', headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ outletId: selectedOutletId, items: cleanedItems }),
       });
-      if (response.ok) {
-        setCart([]);
-        setSelectedOutletId('');
-        alert(`Sukses mengirim request.`);
-        setActiveTab('history');
+      
+      if (response.ok) { 
+        setCart([]); setSelectedOutletId(''); showNotif("Request berhasil dikirim"); setActiveTab('history'); 
+      } else {
+        const errorData = await response.json();
+        console.error("Validation Error:", errorData);
+        alert("Gagal: " + (Array.isArray(errorData.message) ? errorData.message.join(', ') : errorData.message));
       }
     } catch (error) { 
-      alert('Gagal mengirim request.');
-    } finally { setLoading(false); }
+      showNotif("Gagal mengirim request", "error"); 
+    } finally { 
+      setLoading(false); 
+    }
   };
 
+  /* ===================================================================================
+     UI HELPER COMPONENTS
+     Returns mapped colors and icons based on status strings.
+  =================================================================================== */
   const getStatusIcon = (status: string) => {
     switch(status) {
       case 'DRAFT': return <FileText size={12} />;
@@ -345,479 +329,317 @@ export default function AdminOutletRequestPage() {
 
   const getStatusStyle = (status: string) => {
     switch(status) {
-      case 'DRAFT': return 'bg-slate-100 text-slate-500 border-slate-200';
-      case 'OFFICIAL': return 'bg-violet-50 text-violet-600 border-violet-100';
-      case 'PENDING': return 'bg-amber-50 text-amber-600 border-amber-100';
-      case 'PROCESSED': return 'bg-blue-50 text-blue-600 border-blue-100';
+      case 'RECEIVED': return 'bg-emerald-50 text-emerald-600 border-emerald-100';
       case 'SENT': return 'bg-indigo-50 text-indigo-600 border-indigo-100';
-      case 'RECEIVED': return 'bg-emerald-50 text-emerald-700 border-emerald-100';
-      default: return 'bg-slate-50 text-slate-500 border-slate-100';
+      case 'PENDING': return 'bg-amber-50 text-amber-600 border-amber-100';
+      default: return 'bg-slate-50 text-slate-500 border-slate-200';
     }
   };
 
+  /* ===================================================================================
+     MAIN RENDER
+  =================================================================================== */
   return (
-    <div className="max-w-7xl mx-auto space-y-12 pb-20 px-4 sm:px-6 mt-6 font-sans text-slate-900">
+    <div className="min-h-screen bg-[#F8FAFC] font-sans text-slate-600 relative selection:bg-indigo-100">
       
-      {/* Header Section */}
-      <section className="space-y-8">
-        <div className="flex flex-col md:flex-row md:items-end justify-between gap-6">
-          <div className="space-y-1">
-            <h1 className="text-3xl font-semibold text-slate-900 tracking-tight">Purchase Request</h1>
-            <p className="text-slate-500 text-sm font-medium">Kelola permintaan stok barang ke pusat secara kolektif.</p>
-          </div>
-          
-          <div className="flex gap-3 relative">
-            {/* Navigasi Tab Identik dengan style Itemlist */}
-            <div className="flex bg-slate-200/50 p-1 rounded-xl border border-slate-200 h-fit">
-              <button onClick={() => setActiveTab('form')} className={`flex items-center gap-2 px-6 py-2 rounded-lg text-xs font-semibold transition-all ${activeTab === 'form' ? 'bg-white text-indigo-600 shadow-sm' : 'text-slate-500 hover:text-slate-700'}`}>
-                <ClipboardList size={14} /> Request Form
+      {/* Toast Notification Container */}
+      {notification && (
+        <div className={`fixed top-10 right-10 z-[500] flex items-center gap-3 px-6 py-4 rounded-2xl shadow-2xl border animate-in slide-in-from-right duration-500 ${
+          notification.type === 'success' ? 'bg-white border-emerald-100 text-emerald-800' : 'bg-white border-rose-100 text-rose-800'
+        }`}>
+          {notification.type === 'success' ? <CheckCircle2 className="text-emerald-500" size={20}/> : <AlertCircle className="text-rose-500" size={20}/>}
+          <p className="text-sm font-semibold">{notification.message}</p>
+        </div>
+      )}
+
+      {/* Main Layout Container (0.5cm edge gap applied via p-4 md:p-5) */}
+      <div className="w-full p-4 md:p-5 pb-24 space-y-5">
+        
+        {/* === HEADER COMPONENT === */}
+        <PageHeader 
+          title="Purchase" 
+          highlight="Request" 
+          description="Manage and synchronize your outlet inventory requirements with central warehouse."
+          moduleName="Outlet Operations"
+          icon={<ShoppingCart size={14} className="text-indigo-600" />}
+        >
+          <div className="flex flex-col sm:flex-row items-end sm:items-center gap-4">
+            
+            {/* Dropdown Import Excel */}
+            <div className="relative" ref={importMenuRef}>
+              <button onClick={() => setShowImportMenu(!showImportMenu)} className="flex items-center gap-2 bg-white border border-slate-200 text-slate-700 px-5 py-2.5 rounded-lg text-xs font-semibold hover:bg-slate-50 transition-all active:scale-95 shadow-sm group">
+                <FileUp size={14} className="text-indigo-600 group-hover:scale-110 transition-transform" />
+                Actions & Imports
+                <ChevronDown size={14} className={`transition-transform duration-300 ${showImportMenu ? 'rotate-180' : ''}`} />
               </button>
-              <button onClick={() => setActiveTab('history')} className={`flex items-center gap-2 px-6 py-2 rounded-lg text-xs font-semibold transition-all ${activeTab === 'history' ? 'bg-white text-indigo-600 shadow-sm' : 'text-slate-500 hover:text-slate-700'}`}>
-                <History size={14} /> History
-              </button>
+              
+              <input type="file" ref={fileInputRef} onChange={handleImportExcel} accept=".xlsx,.xls" className="hidden" />
+
+              {showImportMenu && (
+                <div className="absolute right-0 sm:left-0 mt-2 w-64 bg-white border border-slate-100 rounded-xl shadow-xl z-[100] overflow-hidden animate-in zoom-in-95 origin-top-left">
+                  <button onClick={handleDownloadTemplate} className="w-full flex items-center gap-3 px-5 py-4 text-xs font-semibold text-slate-600 hover:bg-indigo-50/50 transition-colors border-b border-slate-50 text-left">
+                    <FileSpreadsheet size={16} className="text-indigo-500" /> Download Template
+                  </button>
+                  <button 
+                    onClick={() => { 
+                      fileInputRef.current?.click(); 
+                      setShowImportMenu(false); 
+                    }} 
+                    className="w-full flex items-center gap-3 px-5 py-4 text-xs font-semibold text-slate-600 hover:bg-emerald-50/50 transition-colors text-left"
+                  >
+                    <FileUp size={16} className="text-emerald-500" /> Upload Excel File
+                  </button>
+                </div>
+              )}
             </div>
 
-            {activeTab === 'form' && (
-              <>
-                <input type="file" ref={fileInputRef} onChange={handleImportExcel} accept=".xlsx, .xls" className="hidden" />
-                <button 
-                  onClick={() => fileInputRef.current?.click()}
-                  className="bg-white border border-slate-200 text-slate-600 px-5 py-2 rounded-xl font-medium flex items-center gap-2 transition-all hover:bg-slate-50 active:scale-95 shadow-sm text-xs"
-                >
-                  <FileUp size={16} className="text-indigo-600" /> Import Excel
-                </button>
-              </>
-            )}
-          </div>
-        </div>
-
-        {/* Info Box */}
-        <div className="bg-indigo-50/50 border border-indigo-100 p-5 rounded-3xl flex flex-col md:flex-row md:items-center justify-between gap-4">
-            <div className="flex items-center gap-4 text-xs font-medium text-indigo-700">
-              <AlertCircle size={20} className="text-indigo-400" />
-              <p>Gunakan fitur <b>Import Excel</b> untuk mengupload request dalam jumlah banyak sekaligus.</p>
+            {/* Tab Navigation */}
+            <div className="flex bg-slate-200/50 p-1.5 rounded-xl h-fit shadow-inner">
+              <button onClick={() => setActiveTab('form')} className={`flex items-center gap-2 px-6 py-2 rounded-lg text-xs font-semibold transition-all duration-300 ${activeTab === 'form' ? 'bg-white text-indigo-600 shadow-sm translate-y-[-1px]' : 'text-slate-500 hover:text-slate-800'}`}><ClipboardList size={14} /> Request Form</button>
+              <button onClick={() => setActiveTab('history')} className={`flex items-center gap-2 px-6 py-2 rounded-lg text-xs font-semibold transition-all duration-300 ${activeTab === 'history' ? 'bg-white text-indigo-600 shadow-sm translate-y-[-1px]' : 'text-slate-500 hover:text-slate-800'}`}><History size={14} /> History</button>
             </div>
-            {activeTab === 'form' && (
-              <button 
-                onClick={handleDownloadTemplate}
-                className="flex items-center gap-2 bg-indigo-100 text-indigo-700 px-4 py-2 rounded-xl text-xs font-bold hover:bg-indigo-200 transition-colors"
-              >
-                <FileSpreadsheet size={16} /> DOWNLOAD TEMPLATE
-              </button>
-            )}
-        </div>
+          </div>
+        </PageHeader>
 
+        {/* === TAB CONTENTS === */}
         {activeTab === 'form' ? (
-          <div className="grid grid-cols-1 lg:grid-cols-3 gap-6 animate-in fade-in duration-300">
-            {/* Form & Cart UI (Unchanged logistically, refined visually) */}
-            <div className="lg:col-span-1 space-y-6">
-              <div className="bg-white p-6 rounded-[2rem] border border-slate-200 shadow-sm">
-                <label className="text-[10px] font-bold text-slate-400 uppercase tracking-widest block mb-4">Cari Produk</label>
+          <AnimatedWrapper delay="500" className="grid grid-cols-1 lg:grid-cols-12 gap-5">
+            
+            {/* Left Column (Search & Outlet Selection) */}
+            <div className="lg:col-span-4 space-y-5">
+              
+              {/* Product Discovery Card */}
+              <div className="bg-white p-6 rounded-2xl shadow-sm border border-slate-200/60 relative z-[60] group !overflow-visible">
+                <div className="absolute top-0 right-0 -mr-16 -mt-16 w-48 h-48 bg-indigo-50 rounded-full blur-3xl opacity-50 group-hover:opacity-100 transition-opacity duration-500 pointer-events-none"></div>
+                <label className="text-[10px] font-semibold text-slate-400 uppercase tracking-widest block mb-4">Discovery</label>
                 <div className="relative">
-                  <Search className="absolute left-4 top-1/2 -translate-y-1/2 text-slate-400" size={18} />
-                  <input 
-                    type="text" 
-                    placeholder="Ketik nama barang..." 
-                    className="w-full pl-12 pr-4 py-3 bg-slate-50 border border-slate-200 rounded-2xl outline-none focus:ring-4 focus:ring-indigo-500/5 focus:bg-white transition-all text-sm font-medium" 
-                    value={searchTerm} 
-                    onChange={(e) => setSearchTerm(e.target.value)} 
-                  />
+                  <Search className="absolute left-4 top-1/2 -translate-y-1/2 text-slate-300" size={16} />
+                  <input type="text" placeholder="Search products..." className="w-full pl-11 pr-4 py-3 bg-slate-50 border border-slate-100 rounded-xl outline-none focus:ring-2 focus:ring-indigo-500/20 focus:bg-white focus:border-indigo-300 transition-all text-sm font-semibold" value={searchTerm} onChange={(e) => setSearchTerm(e.target.value)} />
+                  
+                  {/* Dynamic Search Results Dropdown */}
                   {searchTerm.length > 0 && (
-                    <div className="absolute z-50 w-full bg-white border border-slate-200 shadow-xl mt-2 rounded-2xl overflow-hidden animate-in zoom-in-95 duration-150">
+                    <div className="absolute z-[100] w-full bg-white border border-slate-100 shadow-2xl mt-2 rounded-xl overflow-hidden animate-in zoom-in-95 duration-200">
                       {products.filter(p => p.name.toLowerCase().includes(searchTerm.toLowerCase())).slice(0, 5).map((p: any) => (
-                        <div key={p.id} onClick={() => addToCart(p)} className="p-4 hover:bg-indigo-50 cursor-pointer border-b border-slate-50 flex justify-between items-center group">
+                        <div key={p.id} onClick={() => addToCart(p)} className="p-4 hover:bg-indigo-50/50 cursor-pointer flex justify-between items-center transition-colors border-b border-slate-50 last:border-0 group/item">
                           <div>
-                            <p className="font-bold text-slate-800 text-sm">{p.name}</p>
-                            <p className="text-[10px] text-indigo-500 font-black uppercase tracking-widest">{p.itemGroup?.name || 'UMUM'}</p>
+                            <p className="text-sm font-semibold text-slate-800">{p.name}</p>
+                            <p className="text-[10px] text-slate-400 font-semibold uppercase tracking-tighter">{p.itemGroup?.name || 'General'}</p>
                           </div>
-                          <Plus size={16} className="text-slate-300 group-hover:text-indigo-600 transition-colors" />
+                          <Plus size={16} className="text-slate-300 group-hover/item:text-indigo-600 transition-colors" />
                         </div>
                       ))}
-                      <div onClick={() => addToCart()} className="p-4 bg-slate-50 text-indigo-600 cursor-pointer hover:bg-indigo-100 flex justify-between items-center border-t border-slate-100">
-                        <p className="text-xs font-bold italic uppercase tracking-tighter">Tambah Manual</p>
+                      <div onClick={() => addToCart()} className="p-4 bg-indigo-50/30 text-indigo-600 cursor-pointer hover:bg-indigo-50 flex justify-between items-center transition-colors border-t border-indigo-100/50">
+                        <p className="text-xs font-semibold italic">Add Unknown Item Manually</p>
                         <Plus size={16} />
                       </div>
                     </div>
                   )}
                 </div>
               </div>
+
+              {/* Outlet Destination Card */}
+              <div className="bg-slate-900 p-6 rounded-2xl text-white shadow-xl relative z-[10] overflow-hidden group">
+                <div className="absolute bottom-0 right-0 opacity-10 group-hover:scale-110 transition-transform duration-700 pointer-events-none"><Building2 size={140}/></div>
+                <label className="text-[10px] font-semibold text-slate-500 uppercase tracking-widest block mb-4">Destination</label>
+                <div className="relative">
+                  <select required value={selectedOutletId} onChange={(e) => setSelectedOutletId(e.target.value)} className="w-full bg-white/10 border border-white/10 rounded-xl px-4 py-3 text-sm font-semibold outline-none focus:ring-2 focus:ring-white/20 transition-all appearance-none cursor-pointer relative z-10">
+                    <option value="" className="text-slate-900">Choose Origin Outlet...</option>
+                    {outlets.map(o => <option key={o.id} value={o.id} className="text-slate-900">{o.name.toUpperCase()}</option>)}
+                  </select>
+                  <ChevronDown className="absolute right-4 top-1/2 -translate-y-1/2 text-white/40 pointer-events-none z-20" size={16} />
+                </div>
+              </div>
             </div>
 
-            <div className="lg:col-span-2">
-              <div className="bg-white rounded-[2.5rem] border border-slate-200 shadow-sm overflow-hidden flex flex-col h-full min-h-[500px]">
-                <div className="px-8 py-6 border-b flex justify-between items-center bg-slate-50/30">
-                  <h3 className="text-xs font-black text-slate-400 uppercase tracking-widest">Draft Permintaan ({cart.length})</h3>
-                  <div className="flex items-center gap-4">
-                      {cart.length > 0 && (
-                          <div className="flex items-center gap-3">
-                              <Building2 size={16} className="text-indigo-500" />
-                              <select required value={selectedOutletId} onChange={(e) => setSelectedOutletId(e.target.value)}
-                                  className="text-xs font-bold text-indigo-600 bg-white border border-slate-200 px-4 py-2 rounded-xl outline-none focus:ring-4 focus:ring-indigo-500/5 transition-all cursor-pointer shadow-sm"
-                              >
-                                  <option value="">PILIH OUTLET ASAL...</option>
-                                  {outlets.map(o => <option key={o.id} value={o.id}>{o.name.toUpperCase()}</option>)}
-                              </select>
-                          </div>
-                      )}
-                      {cart.length > 0 && (
-                        <button onClick={() => { setCart([]); setSelectedOutletId(''); }} className="text-[10px] text-slate-400 hover:text-rose-500 font-black uppercase transition-all tracking-tighter">Clear All</button>
-                      )}
-                  </div>
-                </div>
+            {/* Right Column (Draft Cart Table) */}
+            <div className="lg:col-span-8">
+              <BentoCard noPadding className="flex flex-col h-full min-h-[500px]">
                 
-                <div className="flex-grow overflow-auto">
+                {/* Cart Header */}
+                <div className="px-6 py-5 border-b border-slate-100 flex justify-between items-center bg-slate-50/30">
+                  <div className="flex items-center gap-3">
+                    <div className="bg-indigo-100 p-2.5 rounded-lg text-indigo-600 shadow-sm"><ShoppingCart size={16}/></div>
+                    <div>
+                      <h3 className="text-lg font-light text-slate-900 tracking-tight">Draft <span className="font-semibold">Request</span></h3>
+                      <p className="text-[10px] text-slate-400 font-semibold uppercase tracking-[0.1em]">Total queuing: {cart.length} items</p>
+                    </div>
+                  </div>
+                  {cart.length > 0 && <button onClick={() => { setCart([]); setSelectedOutletId(''); }} className="text-[10px] font-semibold text-rose-400 hover:text-rose-600 uppercase tracking-widest px-3 py-1.5 rounded-lg transition-all hover:bg-rose-50 border border-transparent hover:border-rose-100">Clear Queue</button>}
+                </div>
+
+                {/* Cart Body */}
+                <div className="flex-grow overflow-auto px-4 py-4 md:px-6 md:py-6">
                   {cart.length > 0 ? (
-                    <table className="w-full">
-                      <thead className="bg-slate-50/50 sticky top-0 z-10">
-                        <tr className="text-slate-400 text-left text-[10px] font-black uppercase tracking-widest border-b">
-                          <th className="px-8 py-5">Produk</th>
-                          <th className="px-4 py-5 text-center w-24">Qty</th>
-                          <th className="px-8 py-5">Catatan</th>
-                          <th className="px-8 py-5 text-right"></th>
+                    <table className="w-full border-separate border-spacing-y-2">
+                      <thead>
+                        <tr className="text-slate-400 text-left text-[10px] font-semibold uppercase tracking-[0.2em] opacity-70">
+                          <th className="px-4 pb-2">Information</th>
+                          <th className="px-3 pb-2 text-center w-28">Quantity</th>
+                          <th className="px-4 pb-2 text-right">Notes</th>
+                          <th className="px-3 pb-2"></th>
                         </tr>
                       </thead>
-                      <tbody className="divide-y divide-slate-50">
+                      <tbody>
                         {cart.map((item, idx) => {
                           const isUnknown = !item.productId;
-
                           return (
-                            <tr key={idx} className={`group transition-colors ${isUnknown ? 'bg-rose-50/40' : 'hover:bg-slate-50/80'}`}>
-                              <td className="px-8 py-5">
-                                {isUnknown ? (
-                                  <div className="space-y-3">
-                                    <div className="flex items-center gap-2 text-rose-600">
-                                      <AlertCircle size={14} className="animate-pulse" />
-                                      <span className="text-[10px] font-black uppercase tracking-tighter">Item tidak terbaca sistem</span>
-                                    </div>
-                                    
-                                    {/* Dropdown Pencarian untuk Menyambungkan ke Database */}
-                                    <div className="relative group/search">
-                                      <div className="flex items-center bg-white border border-rose-200 rounded-xl px-3 py-2 shadow-sm focus-within:ring-2 ring-rose-500/20">
-                                        <Search size={14} className="text-slate-400 mr-2" />
-                                        <input 
-                                          className="flex-1 text-sm font-bold outline-none"
-                                          value={item.name}
-                                          placeholder="Ketik untuk mencari di database..."
-                                          onChange={(e) => {
-                                            const n = [...cart];
-                                            n[idx].name = e.target.value;
-                                            setCart(n);
-                                          }}
-                                        />
+                            <tr key={idx} className={`group transition-all duration-300 ${isUnknown ? 'bg-rose-50/30' : 'bg-slate-50/50 hover:bg-white hover:shadow-md hover:translate-y-[-1px]'}`}>
+                              <td className={`px-4 py-4 rounded-l-lg border-y border-l transition-colors ${isUnknown ? 'border-rose-100' : 'border-slate-100 group-hover:border-indigo-100'}`}>
+                                <div className="space-y-3">
+                                  {isUnknown ? (
+                                    <div className="space-y-2">
+                                      <div className="flex items-center gap-1.5 text-rose-500 mb-1 font-semibold text-[9px] uppercase tracking-widest"><AlertCircle size={12} className="animate-pulse" /> Unknown Item</div>
+                                      <div className="relative">
+                                        <div className="flex items-center bg-white border border-rose-100 rounded-lg px-3 py-2 shadow-sm focus-within:border-rose-400 transition-all"><Search size={14} className="text-slate-300 mr-2" /><input className="flex-1 text-xs font-semibold outline-none bg-transparent" value={item.name} placeholder="Manual input..." onChange={(e) => { const n=[...cart]; n[idx].name=e.target.value; setCart(n); }} /></div>
+                                        {item.name.length > 1 && (
+                                          <div className="absolute z-50 w-full bg-white border border-slate-100 shadow-xl mt-1.5 rounded-lg overflow-hidden max-h-40 overflow-y-auto">
+                                            {products.filter(p => p.name.toLowerCase().includes(item.name.toLowerCase())).map(p => (<div key={p.id} onClick={() => { const n=[...cart]; n[idx] = { ...n[idx], productId: p.id, name: p.name, itemGroupId: p.itemGroupId, itemGroupName: p.itemGroup?.name, uom: p.uom, isNew: false }; setCart(n); }} className="p-2.5 text-xs font-semibold hover:bg-indigo-50 cursor-pointer flex justify-between border-b border-slate-50 text-slate-600"><span>{p.name}</span><span className="text-indigo-600 uppercase text-[9px]">Connect</span></div>))}
+                                          </div>
+                                        )}
                                       </div>
-                                      
-                                      {/* List Dropdown Otomatis */}
-                                      {item.name.length > 1 && isUnknown && (
-                                        <div className="absolute z-50 w-full bg-white border border-slate-200 shadow-xl mt-1 rounded-xl overflow-hidden max-h-40 overflow-y-auto">
-                                          {products
-                                            .filter(p => p.name.toLowerCase().includes(item.name.toLowerCase()))
-                                            .map(p => (
-                                              <div 
-                                                key={p.id}
-                                                onClick={() => {
-                                                  const n = [...cart];
-                                                  n[idx] = { ...n[idx], productId: p.id, name: p.name, itemGroupId: p.itemGroupId, itemGroupName: p.itemGroup?.name, uom: p.uom, isNew: false };
-                                                  setCart(n);
-                                                }}
-                                                className="p-3 text-xs font-bold hover:bg-indigo-50 cursor-pointer border-b border-slate-50 flex justify-between"
-                                              >
-                                                {p.name} <span className="text-indigo-500">PILIH</span>
-                                              </div>
-                                          ))}
-                                        </div>
-                                      )}
                                     </div>
+                                  ) : (
+                                    <div className="flex flex-col"><p className="text-sm font-semibold text-slate-800 group-hover:text-indigo-600 transition-colors">{item.name}</p><p className="text-[9px] text-slate-400 font-semibold uppercase tracking-widest mt-0.5">{item.itemGroupName || 'General'}</p></div>
+                                  )}
+                                  <div className="flex gap-2">
+                                    <select disabled={!item.isNew} className={`text-[9px] font-semibold px-2 py-1 rounded border-none outline-none appearance-none transition-all ${item.isNew ? 'bg-slate-900 text-white cursor-pointer' : 'bg-slate-200/50 text-slate-400'}`} value={item.itemGroupId} onChange={(e) => { const selectedId = e.target.value; const n = [...cart]; n[idx].itemGroupId = selectedId; n[idx].itemGroupName = itemGroups.find(g => g.id === selectedId)?.name; setCart(n); }}><option value="">CATEGORY</option>{itemGroups.map(g => <option key={g.id} value={g.id}>{g.name}</option>)}</select>
+                                    <select disabled={!item.isNew} className={`text-[9px] font-semibold px-2 py-1 rounded border-none outline-none appearance-none transition-all ${item.isNew ? 'bg-indigo-100 text-indigo-700 cursor-pointer' : 'bg-slate-200/50 text-slate-400'}`} value={item.uom} onChange={(e) => { const n=[...cart]; n[idx].uom=e.target.value; setCart(n); }}>{['PCS', 'PACK', 'BTL', 'KG', 'CAN', 'GR', 'ML', 'LTR'].map(u => <option key={u} value={u}>{u}</option>)}</select>
                                   </div>
-                                ) : (
-                                  <>
-                                    <p className="font-bold text-slate-800 text-sm">{item.name}</p>
-                                    <span className="text-[9px] font-black text-indigo-400 uppercase">Terdaftar di Sistem</span>
-                                  </>
-                                )}
-                                
-                                {/* Bagian Kategori & UOM */}
-                                <div className="flex gap-2 mt-3">
-                                  <select 
-                                    disabled={!item.isNew} // Hanya bisa diubah jika item baru
-                                    className={`text-[10px] font-bold px-2 py-1 rounded border-none outline-none appearance-none transition-all ${
-                                      item.isNew ? 'bg-indigo-600 text-white cursor-pointer shadow-md' : 'bg-slate-100 text-slate-400 cursor-not-allowed'
-                                    }`}
-                                    value={item.itemGroupId}
-                                    onChange={(e) => {
-                                      const n = [...cart];
-                                      n[idx].itemGroupId = e.target.value;
-                                      setCart(n);
-                                    }}
-                                  >
-                                    <option value="">Pilih Kategori...</option>
-                                    {itemGroups.map(g => <option key={g.id} value={g.id}>{g.name}</option>)}
-                                  </select>
-
-                                  <select 
-                                    disabled={!item.isNew} // Hanya bisa diubah jika item baru
-                                    className={`text-[10px] font-bold px-2 py-1 rounded border-none outline-none appearance-none transition-all ${
-                                      item.isNew ? 'bg-indigo-600 text-white cursor-pointer shadow-md' : 'bg-slate-100 text-slate-400 cursor-not-allowed'
-                                    }`}
-                                    value={item.uom}
-                                    onChange={(e) => {
-                                      const n = [...cart];
-                                      n[idx].uom = e.target.value;
-                                      setCart(n);
-                                    }}
-                                  >
-                                    {['PCS', 'PACK', 'BTL', 'KG', 'GR', 'LTR', 'ML', 'CAN'].map(u => (
-                                      <option key={u} value={u}>{u}</option>
-                                    ))}
-                                  </select>
                                 </div>
                               </td>
-                              
-                              {/* Kolom Qty, Notes, dan Delete tetap sama namun selaras gaya visual */}
-                              <td className="px-4 py-5 text-center">
-                                  <input type="number" className="w-20 p-2.5 bg-slate-50 border-none rounded-xl text-center font-black text-indigo-600 text-sm outline-none" 
-                                      value={item.quantity} onChange={(e) => { const n=[...cart]; n[idx].quantity=Number(e.target.value); setCart(n); }} 
-                                  />
-                              </td>
-                              <td className="px-8 py-5">
-                                  <input placeholder="Catatan tambahan..." className="w-full p-2.5 bg-white border border-slate-100 rounded-xl text-xs font-medium outline-none" 
-                                      value={item.notes} onChange={(e) => { const n=[...cart]; n[idx].notes=e.target.value; setCart(n); }} 
-                                  />
-                              </td>
-                              <td className="px-8 py-5 text-right">
-                                <button onClick={() => setCart(cart.filter((_, i) => i !== idx))} className="p-2 text-slate-300 hover:text-rose-500 transition-all opacity-0 group-hover:opacity-100"><X size={18}/></button>
-                              </td>
+                              <td className={`px-3 py-4 text-center border-y transition-colors ${isUnknown ? 'border-rose-100' : 'border-slate-100 group-hover:border-indigo-100'}`}><input type="number" className="w-20 p-2.5 bg-white border border-slate-100 rounded-lg text-center font-semibold text-indigo-600 text-sm outline-none focus:ring-2 focus:ring-indigo-500/20 transition-all shadow-sm" value={item.quantity} onChange={(e) => { const n=[...cart]; n[idx].quantity=Number(e.target.value); setCart(n); }} /></td>
+                              <td className={`px-4 py-4 border-y transition-colors ${isUnknown ? 'border-rose-100' : 'border-slate-100 group-hover:border-indigo-100'}`}><input placeholder="Notes..." className="w-full p-2.5 bg-white border border-slate-100 rounded-lg text-xs font-semibold outline-none focus:border-indigo-300 shadow-sm text-slate-600 placeholder:text-slate-300" value={item.notes} onChange={(e) => { const n=[...cart]; n[idx].notes=e.target.value; setCart(n); }} /></td>
+                              <td className={`px-3 py-4 text-right rounded-r-lg border-y border-r transition-colors ${isUnknown ? 'border-rose-100' : 'border-slate-100 group-hover:border-indigo-100'}`}><button onClick={() => setCart(cart.filter((_, i) => i !== idx))} className="p-2 text-slate-300 hover:text-rose-500 hover:bg-rose-50 rounded-lg transition-all opacity-0 group-hover:opacity-100 duration-300"><X size={16}/></button></td>
                             </tr>
                           );
                         })}
                       </tbody>
                     </table>
                   ) : (
-                    <div className="h-full flex flex-col items-center justify-center py-24 opacity-30">
-                      <ClipboardList size={64} className="text-slate-200 mb-4" />
-                      <p className="text-slate-400 font-bold uppercase tracking-widest text-xs">Keranjang Kosong</p>
+                    <div className="h-full flex flex-col items-center justify-center py-10 opacity-70">
+                      <div className="relative mb-4"><div className="absolute inset-0 bg-indigo-50 rounded-full blur-xl"></div><ShoppingCart size={48} className="text-indigo-200 relative" /></div>
+                      <p className="text-slate-400 font-semibold tracking-[0.2em] uppercase text-[10px] text-center">Your draft list is currently empty</p>
                     </div>
                   )}
                 </div>
-                
-                {cart.length > 0 && (
-                  <div className="p-8 bg-white border-t border-slate-100 shadow-[0_-10px_40px_rgba(0,0,0,0.02)]">
-                    <button onClick={handleSendRequest} disabled={loading} 
-                      className={`w-full py-5 rounded-[1.5rem] font-black text-sm uppercase tracking-[0.2em] shadow-xl transition-all active:scale-95 disabled:opacity-50 ${
-                          !selectedOutletId ? 'bg-slate-100 text-slate-400 cursor-not-allowed' : 'bg-indigo-600 hover:bg-indigo-700 text-white shadow-indigo-200'
-                      }`}
-                    >
-                      {loading ? <Loader2 className="animate-spin mx-auto"/> : !selectedOutletId ? 'Pilih Outlet Dahulu' : 'Kirim Request Sekarang'}
-                    </button>
-                  </div>
-                )}
-              </div>
-            </div>
-          </div>
-        ) : (
-          /* History Table UI (Unchanged logic, refined visually) */
-          <div className="space-y-6 animate-in fade-in duration-300">
-             {/* Filter Bar History */}
-             <div className="bg-white p-2 rounded-[2rem] shadow-sm border border-slate-200 flex flex-wrap gap-2 items-center">
-                <div className="relative flex-1 min-w-[280px]">
-                  <Search className="absolute left-4 top-1/2 -translate-y-1/2 text-slate-400" size={18} />
-                  <input type="text" placeholder="Cari nama item atau status..." className="w-full pl-11 pr-4 py-3 bg-transparent rounded-2xl outline-none transition-all text-sm font-medium"
-                    value={filters.searchTerm} onChange={e => setFilters({...filters, searchTerm: e.target.value})} />
-                </div>
-                <div className="flex gap-2 p-1">
-                    <select className="bg-slate-50 border-none rounded-xl px-4 py-2.5 text-xs font-bold uppercase tracking-widest text-slate-600 outline-none cursor-pointer" value={filters.status} onChange={e => setFilters({...filters, status: e.target.value})}>
-                        <option value="ALL">SEMUA STATUS</option>
-                        <option value="PENDING">PENDING</option>
-                        <option value="PROCESSED">PROCESSED</option>
-                        <option value="RECEIVED">RECEIVED</option>
-                    </select>
-                    <input type="date" className="bg-slate-50 border-none rounded-xl px-4 py-2.5 text-xs font-bold text-slate-600 outline-none" value={filters.startDate} onChange={e => setFilters({...filters, startDate: e.target.value})}/>
-                    <input type="date" className="bg-slate-50 border-none rounded-xl px-4 py-2.5 text-xs font-bold text-slate-600 outline-none" value={filters.endDate} onChange={e => setFilters({...filters, endDate: e.target.value})}/>
-                    <button onClick={clearFilters} className="bg-rose-50 text-rose-600 p-2.5 rounded-xl hover:bg-rose-100 transition-all border border-rose-100 shadow-sm shadow-rose-100/50"><FilterX size={18}/></button>
-                </div>
-             </div>
 
-             <div className="bg-white rounded-[2.5rem] border border-slate-200 shadow-sm overflow-hidden">
-                <div className="px-8 py-6 border-b flex justify-between items-center bg-white">
-                  <div className="flex items-center gap-3">
-                    <div className="p-2.5 bg-indigo-50 text-indigo-600 rounded-xl"><History size={20}/></div>
-                    <h3 className="text-base font-bold text-slate-800 tracking-tight">Riwayat Purchase Request</h3>
-                  </div>
-                  <div className="flex gap-3 relative" ref={exportMenuRef}>
-                    <button onClick={fetchHistory} className="p-2.5 hover:bg-indigo-50 rounded-xl transition-all border border-slate-100 text-slate-400 hover:text-indigo-600"><RefreshCw size={20} className={loading ? 'animate-spin' : ''}/></button>
-                    <button onClick={() => setShowExportMenu(!showExportMenu)} className="bg-slate-950 text-white px-6 py-2.5 rounded-xl text-xs font-black uppercase tracking-[0.1em] shadow-lg shadow-slate-200 flex items-center gap-2 active:scale-95 transition-all">
-                      <Download size={16}/> Export <ChevronDown size={14}/>
-                    </button>
+                {/* Submit Action Footer */}
+                <div className="p-6 bg-slate-50/50 border-t border-slate-100">
+                  <button onClick={handleSendRequest} disabled={loading || cart.length === 0} className={`w-full py-4 rounded-xl font-semibold text-xs uppercase tracking-[0.2em] shadow-lg transition-all active:scale-95 disabled:opacity-40 disabled:translate-y-0 translate-y-[-1px] ${cart.length > 0 ? 'bg-slate-900 text-white hover:bg-indigo-600 hover:shadow-indigo-500/20' : 'bg-slate-200 text-slate-400 cursor-not-allowed'}`}>
+                    {loading ? <Loader2 className="animate-spin mx-auto" size={18}/> : 'Complete & Send Request'}
+                  </button>
+                </div>
+              </BentoCard>
+            </div>
+          </AnimatedWrapper>
+        ) : (
+          
+          /* === HISTORY TAB === */
+          <AnimatedWrapper delay="500" className="space-y-5">
+            
+            {/* Filters Section */}
+            <BentoCard className="flex flex-wrap gap-5 items-end relative !overflow-visible">
+               <div className="flex-grow min-w-[250px]">
+                 <label className="text-[10px] font-semibold text-slate-400 uppercase tracking-widest block mb-2 ml-1">Universal Search</label>
+                 <div className="relative">
+                   <Search className="absolute left-3 top-1/2 -translate-y-1/2 text-slate-300" size={14} />
+                   <input className="w-full pl-9 pr-4 py-2.5 bg-slate-50 border border-slate-100 rounded-lg text-xs font-semibold outline-none focus:bg-white focus:ring-2 focus:ring-indigo-500/20 transition-all placeholder:text-slate-300" placeholder="Search item or status..." value={filters.searchTerm} onChange={e => setFilters({...filters, searchTerm: e.target.value})}/>
+                 </div>
+               </div>
+               <div className="flex flex-wrap gap-3 items-end">
+                 <div className="w-40">
+                   <label className="text-[10px] font-semibold text-slate-400 uppercase tracking-widest block mb-2 ml-1">Status Filter</label>
+                   <select className="w-full p-2.5 bg-slate-50 border border-slate-100 rounded-lg text-xs font-semibold outline-none cursor-pointer focus:bg-white transition-all" value={filters.status} onChange={e => setFilters({...filters, status: e.target.value})}>
+                     <option value="ALL">All Status</option><option value="PENDING">Pending</option><option value="PROCESSED">Processed</option><option value="RECEIVED">Received</option>
+                   </select>
+                 </div>
+                 <div className="flex gap-2">
+                    <div className="w-36"><label className="text-[10px] font-semibold text-slate-400 uppercase tracking-widest block mb-2 ml-1 flex items-center gap-1"><Calendar size={12}/> Range</label><input type="date" className="w-full p-2.5 bg-slate-50 border border-slate-100 rounded-lg text-[11px] outline-none focus:bg-white transition-all text-slate-600 font-medium" value={filters.startDate} onChange={e => setFilters({...filters, startDate: e.target.value})}/></div>
+                    <div className="w-36 self-end"><input type="date" className="w-full p-2.5 bg-slate-50 border border-slate-100 rounded-lg text-[11px] outline-none focus:bg-white transition-all text-slate-600 font-medium" value={filters.endDate} onChange={e => setFilters({...filters, endDate: e.target.value})}/></div>
+                 </div>
+                 <button onClick={clearFilters} className="bg-rose-50 text-rose-500 p-2.5 rounded-lg hover:bg-rose-100 transition-all border border-rose-100 active:scale-95 shadow-sm"><FilterX size={16}/></button>
+               </div>
+            </BentoCard>
+
+            {/* History Table Section */}
+            <BentoCard noPadding>
+               <div className="px-6 py-5 border-b border-slate-100 flex justify-between items-center bg-white">
+                  <div className="flex items-center gap-3"><div className="bg-indigo-50 p-2 rounded-lg text-indigo-600"><History size={16}/></div><h3 className="text-lg font-light text-slate-900 tracking-tight">Request <span className="font-semibold text-indigo-600">Archive</span></h3></div>
+                  <div className="flex gap-2 relative" ref={exportMenuRef}>
+                    <button onClick={fetchHistory} className="p-2.5 hover:bg-slate-50 rounded-lg transition-all border border-slate-100 text-slate-400 hover:text-indigo-600"><RefreshCw size={14} className={loading ? 'animate-spin' : ''}/></button>
+                    <button onClick={() => setShowExportMenu(!showExportMenu)} className="bg-slate-900 text-white px-5 py-2.5 rounded-lg text-[10px] font-semibold uppercase tracking-widest flex items-center gap-2 shadow-md hover:bg-indigo-600 transition-all active:scale-95"><Download size={14}/> Export <ChevronDown size={12} className={showExportMenu ? 'rotate-180 transition-transform' : 'transition-transform'}/></button>
+                    
                     {showExportMenu && (
-                      <div className="absolute top-full right-0 mt-3 w-56 bg-white border border-slate-100 rounded-[1.5rem] shadow-2xl z-50 overflow-hidden animate-in zoom-in-95 duration-200">
-                        <button onClick={exportToExcel} className="w-full px-5 py-4 text-left text-xs font-bold hover:bg-emerald-50 flex items-center gap-4 transition-colors border-b border-slate-50 text-slate-700 uppercase tracking-tighter">
-                          <TableIcon size={18} className="text-emerald-500" /> Excel Spreadsheet
-                        </button>
-                        <button onClick={exportToPDF} className="w-full px-5 py-4 text-left text-xs font-bold hover:bg-rose-50 flex items-center gap-4 transition-colors text-slate-700 uppercase tracking-tighter">
-                          <FileText size={18} className="text-rose-500" /> PDF Document
-                        </button>
+                      <div className="absolute top-full right-0 mt-2 w-52 bg-white border border-slate-100 rounded-xl shadow-xl z-[100] overflow-hidden animate-in zoom-in-95 origin-top-right">
+                        <button onClick={exportToExcel} className="w-full px-4 py-3 text-left text-[11px] font-semibold hover:bg-emerald-50 flex items-center gap-3 text-slate-700 transition-colors border-b border-slate-50 uppercase tracking-wider"><TableIcon size={14} className="text-emerald-500" /> Excel Format</button>
+                        <button onClick={exportToPDF} className="w-full px-4 py-3 text-left text-[11px] font-semibold hover:bg-rose-50 flex items-center gap-3 text-slate-700 transition-colors uppercase tracking-wider"><FileText size={14} className="text-rose-500" /> PDF Document</button>
                       </div>
                     )}
                   </div>
-                </div>
-                
-                <div className="overflow-x-auto">
-                  <table className="w-full text-sm">
-                    <thead>
-                      <tr className="bg-slate-50/50 text-slate-400 text-left text-[10px] font-black uppercase tracking-widest border-b">
-                        <th className="px-8 py-5">Waktu Request</th>
-                        <th className="px-8 py-5">Item & Outlet</th>
-                        <th className="px-4 py-5 text-center">Qty Req</th>
-                        <th className="px-4 py-5 text-center">Qty Rec</th>
-                        <th className="px-8 py-5 text-center">Status</th>
-                        <th className="px-8 py-5">Catatan</th>
-                      </tr>
-                    </thead>
-                    <tbody className="divide-y divide-slate-50">
-                      {loading ? (
-                        <tr><td colSpan={6} className="py-32 text-center"><Loader2 className="animate-spin mx-auto text-indigo-400 mb-2" size={32}/><p className="text-xs font-black uppercase tracking-[0.2em] text-slate-300">Synchronizing...</p></td></tr>
-                      ) : filteredHistory.map((item: any) => (
-                        <tr key={item.id} className="group hover:bg-slate-50/30 transition-all border-none">
-                          <td className="px-8 py-5">
-                            <div className="flex flex-col">
-                              <span className="text-slate-800 font-bold text-xs">{new Date(item.createdAt).toLocaleDateString('id-ID', { day: '2-digit', month: 'short', year: 'numeric' })}</span>
-                              <span className="text-[10px] text-slate-400 font-bold flex items-center gap-1"><Clock size={10} /> {new Date(item.createdAt).toLocaleTimeString('id-ID', { hour: '2-digit', minute: '2-digit' })}</span>
-                            </div>
-                          </td>
-                          <td className="px-8 py-5">
-                            <p className="font-bold text-slate-800">{item.product?.name || item.tempProductName}</p>
-                            <div className="flex items-center gap-2 mt-1">
-                                <span className="text-[9px] font-black text-indigo-600 bg-indigo-50 px-2 py-0.5 rounded uppercase tracking-tighter">{item.purchaseRequest?.outlet?.name || 'CENTRAL'}</span>
-                                <span className="text-[9px] font-black text-slate-400 uppercase">{item.product?.sku || '-'}</span>
-                            </div>
-                          </td>
-                          <td className="px-4 py-5 text-center">
-                            <span className="font-black text-slate-700 text-sm">{item.quantity}</span>
-                            <span className="text-[9px] text-slate-400 font-black uppercase ml-1">{item.uom}</span>
-                          </td>
-                          <td className="px-4 py-5 text-center">
-                            <span className={`font-black text-sm ${item.receivedQuantity > 0 ? 'text-emerald-600' : 'text-slate-200'}`}>{item.receivedQuantity || 0}</span>
-                          </td>
-                          <td className="px-8 py-5 text-center">
-                            <span className={`inline-flex items-center gap-1.5 px-3 py-1 rounded-full text-[9px] font-black uppercase border tracking-widest ${getStatusStyle(item.status)}`}>
-                              {getStatusIcon(item.status)} {item.status}
-                            </span>
-                          </td>
-                          <td className="px-8 py-5">
-                            <p className="text-[10px] text-slate-400 font-medium italic truncate max-w-[120px]">{item.notes || '-'}</p>
-                          </td>
-                        </tr>
-                      ))}
-                    </tbody>
-                  </table>
-                </div>
-             </div>
-          </div>
+               </div>
+               
+               <div className="overflow-x-auto">
+                 <table className="w-full text-left border-separate border-spacing-y-2 px-4 pb-4 pt-2">
+                   <thead><tr className="text-slate-400 text-[10px] font-semibold uppercase tracking-[0.2em] opacity-80"><th className="px-4 pb-2">Timestamp</th><th className="px-4 pb-2">Item & Destination</th><th className="px-4 pb-2 text-center whitespace-nowrap">Req / Rec</th><th className="px-4 pb-2 text-center">Status</th><th className="px-4 pb-2 text-center">No. SJ</th><th className="px-4 pb-2 text-right">Notes</th></tr></thead>
+                   <tbody>
+                     {loading ? (<tr><td colSpan={5} className="py-20 text-center"><div className="flex flex-col items-center"><Loader2 className="animate-spin text-indigo-400 mb-3" size={32}/><p className="text-[10px] font-semibold text-slate-300 uppercase tracking-[0.2em]">Syncing Archives...</p></div></td></tr>) : 
+                     filteredHistory.length > 0 ? filteredHistory.map((item: any) => (
+                       <tr key={item.id} className="bg-white hover:bg-slate-50/80 transition-all border-y border-slate-100 group hover:shadow-sm">
+                         <td className="px-4 py-3.5 rounded-l-lg border-l border-y border-slate-100 group-hover:border-indigo-100 transition-colors"><div className="flex flex-col space-y-0.5"><span className="text-slate-800 font-semibold text-[11px]">{new Date(item.createdAt).toLocaleDateString('id-ID', { day: '2-digit', month: 'short', year: 'numeric' })}</span><span className="text-[9px] text-slate-400 flex items-center gap-1 font-semibold"><Clock size={10} /> {new Date(item.createdAt).toLocaleTimeString('id-ID', { hour: '2-digit', minute: '2-digit' })}</span></div></td>
+                         <td className="px-4 py-3.5 border-y border-slate-100 group-hover:border-indigo-100 transition-colors"><div className="flex flex-col"><p className="font-semibold text-slate-800 text-xs leading-tight">{item.product?.name || item.tempProductName}</p><div className="flex items-center gap-1.5 mt-1"><span className="text-[8px] font-bold text-indigo-600 bg-indigo-50 px-2 py-0.5 rounded border border-indigo-100 uppercase tracking-widest">{item.purchaseRequest?.outlet?.name || 'CENTRAL'}</span><span className="text-[8px] font-semibold text-slate-400 uppercase">SKU: {item.product?.sku || '-'}</span></div></div></td>
+                         <td className="px-4 py-3.5 text-center border-y border-slate-100 group-hover:border-indigo-100 transition-colors"><div className="flex flex-col items-center"><span className="font-bold text-slate-800 text-sm">{item.quantity}</span><div className={`text-[9px] font-bold mt-0.5 px-1.5 py-0.5 rounded ${item.receivedQuantity > 0 ? 'bg-emerald-50 text-emerald-600' : 'text-slate-400'}`}>REC: {item.receivedQuantity || 0}</div></div></td>
+                         <td className="px-4 py-3.5 text-center border-y border-slate-100 group-hover:border-indigo-100 transition-colors"><span className={`inline-flex items-center gap-1 px-3 py-1 rounded-md text-[8px] font-bold uppercase border tracking-widest ${getStatusStyle(item.status)}`}>{getStatusIcon(item.status)} {item.status}</span></td>
+                         <td className="px-4 py-3.5 text-center border-y border-slate-100 group-hover:border-indigo-100 transition-colors"><p className="text-[10px] text-slate-500 font-bold uppercase tracking-tight">{item.purchasingItems?.[0]?.purchasing?.referenceNo || '-'}</p></td>
+                         <td className="px-4 py-3.5 text-right rounded-r-lg border-r border-y border-slate-100 group-hover:border-indigo-100 transition-colors"><p className="text-[10px] text-slate-400 italic truncate max-w-[120px] ml-auto font-medium">{item.notes || '-'}</p></td>
+                       </tr>
+                     )) : (<tr><td colSpan={5} className="py-20"><EmptyState icon={<History size={40}/>} title="No matching history found" /></td></tr>)}
+                   </tbody>
+                 </table>
+               </div>
+            </BentoCard>
+          </AnimatedWrapper>
         )}
-      </section>
-      {/* MODAL SARAN IMPORT */}
+      </div>
+
+      {/* ===================================================================================
+         MODAL: SYNC CONFLICTS
+         Displays Excel import suggestions when confidence score is in the grey area.
+      =================================================================================== */}
       {importSuggestions.length > 0 && (
-        <div className="fixed inset-0 bg-slate-900/60 backdrop-blur-sm flex items-center justify-center z-[250] p-4">
-          <div className="bg-white rounded-[2.5rem] w-full max-w-lg shadow-2xl overflow-hidden animate-in zoom-in-95">
-            <div className="p-8 border-b border-slate-50 bg-indigo-50/30">
-              <div className="flex items-center gap-3 text-indigo-600 mb-2">
-                <RefreshCw size={24} className="animate-spin-slow" />
-                <h2 className="text-xl font-black uppercase tracking-tighter">Konfirmasi Item</h2>
-              </div>
-              <p className="text-xs font-medium text-slate-500">Beberapa nama barang di Excel mirip dengan inventory kami. Pilih untuk menyambungkan:</p>
+        <div className="fixed inset-0 bg-slate-900/40 backdrop-blur-sm flex items-center justify-center z-[1000] p-4 animate-in fade-in duration-300">
+          <div className="bg-white rounded-2xl w-full max-w-lg shadow-2xl overflow-hidden animate-in zoom-in-95 duration-500">
+            <div className="p-8 border-b border-slate-50 bg-indigo-50/30 text-center">
+              <div className="flex items-center justify-center gap-3 text-indigo-600 mb-2"><RefreshCw size={24} className="animate-spin-slow" /><h2 className="text-xl font-light tracking-tight text-slate-900">Sync <span className="font-semibold">Conflicts</span></h2></div>
+              <p className="text-xs text-slate-500 font-medium">Similar items detected in inventory. Please link them.</p>
             </div>
             
-            <div className="max-h-[400px] overflow-y-auto p-6 space-y-3">
+            <div className="max-h-[350px] overflow-y-auto p-6 space-y-3 bg-slate-50/50">
               {importSuggestions.map((item, idx) => (
-                <div key={idx} className="p-4 bg-slate-50 rounded-2xl border border-slate-100 flex flex-col gap-3">
+                <div key={idx} className="p-4 bg-white rounded-xl border border-slate-200 shadow-sm flex flex-col gap-3 hover:border-indigo-300 transition-colors">
                   <div className="flex justify-between items-start">
-                    <div>
-                      <span className="text-[9px] font-black text-slate-400 uppercase tracking-widest">Di Excel</span>
-                      <p className="text-sm font-bold text-slate-800">{item.name}</p>
-                    </div>
-                    <div className="text-right">
-                      <span className="text-[9px] font-black text-indigo-400 uppercase tracking-widest">Saran Sistem</span>
+                    <div><span className="text-[8px] font-bold text-slate-400 uppercase tracking-widest block mb-1">Spreadsheet Record</span><p className="text-xs font-semibold text-slate-800">{item.name}</p></div>
+                    <div className="text-right flex flex-col items-end">
+                      <span className="text-[8px] font-bold text-indigo-500 uppercase tracking-widest block mb-2 px-2 py-0.5 bg-indigo-50 rounded border border-indigo-100">Match {item.score}%</span>
                       <button 
-                        onClick={() => {
-                          const linkedItem = {
-                            productId: item.suggestion.id,
-                            name: item.suggestion.name, // Gunakan nama resmi dari DB
-                            itemGroupName: item.suggestion.itemGroup?.name,
-                            uom: item.uom,
-                            quantity: item.quantity,
-                            notes: item.notes
-                          };
-                          setCart([...cart, linkedItem]);
-                          setImportSuggestions(prev => prev.filter((_, i) => i !== idx));
-                          if(importSuggestions.length === 1) showNotif("Item berhasil disambungkan");
-                        }}
-                        className="block mt-1 px-3 py-1.5 bg-indigo-600 text-white text-[10px] font-bold rounded-lg hover:bg-indigo-700 transition-all shadow-md shadow-indigo-100"
+                        onClick={() => { 
+                          const linkedItem = { productId: item.suggestion.id, name: item.suggestion.name, itemGroupId: item.suggestion.itemGroupId, itemGroupName: item.suggestion.itemGroup?.name, uom: item.suggestion.uom || item.uom, quantity: item.quantity, notes: item.notes, isNew: false }; 
+                          setCart(prev => [...prev, linkedItem]); 
+                          setImportSuggestions(prev => prev.filter((_, i) => i !== idx)); 
+                          if(importSuggestions.length === 1) showNotif("Item successfully linked"); 
+                        }} 
+                        className="bg-indigo-600 text-white text-[9px] font-bold uppercase tracking-widest px-3 py-1.5 rounded-lg shadow-md hover:bg-slate-900 transition-all active:scale-95"
                       >
-                        Gunakan: {item.suggestion.name}
+                        Use Connect
                       </button>
                     </div>
                   </div>
                 </div>
               ))}
             </div>
-
-            {/* MODAL SARAN IMPORT */}
-            {importSuggestions.length > 0 && (
-              <div className="fixed inset-0 bg-slate-900/60 backdrop-blur-sm flex items-center justify-center z-[250] p-4">
-                <div className="bg-white rounded-[2.5rem] w-full max-w-lg shadow-2xl overflow-hidden animate-in zoom-in-95">
-                  <div className="p-8 border-b border-slate-50 bg-indigo-50/30">
-                    <h2 className="text-xl font-black uppercase tracking-tighter text-indigo-600">Konfirmasi Item</h2>
-                    <p className="text-xs font-medium text-slate-500">Pilih kecocokan produk untuk item berikut:</p>
-                  </div>
-                  
-                  <div className="max-h-[400px] overflow-y-auto p-6 space-y-3">
-                    {/* VARIABEL 'item' dan 'idx' DIDEFINISIKAN DI DALAM MAP INI */}
-                    {importSuggestions.map((item, idx) => (
-                      <div key={idx} className="p-4 bg-slate-50 rounded-2xl border border-slate-100 flex justify-between items-center">
-                        <div>
-                          <span className="text-[9px] font-black text-slate-400 uppercase">Di Excel</span>
-                          <p className="text-sm font-bold text-slate-800">{item.name}</p>
-                        </div>
-                        <div className="text-right flex flex-col items-end gap-2">
-                          <span className="px-2 py-0.5 rounded-full text-[9px] font-black border bg-orange-50 text-orange-600 border-orange-100">
-                            MATCH {item.score}%
-                          </span>
-                          <button 
-                            onClick={() => {
-                              const linkedItem = {
-                                productId: item.suggestion.id,
-                                name: item.suggestion.name,
-                                itemGroupName: item.suggestion.itemGroup?.name,
-                                uom: item.uom,
-                                quantity: item.quantity,
-                                notes: item.notes
-                              };
-                              setCart([...cart, linkedItem]);
-                              setImportSuggestions(prev => prev.filter((_, i) => i !== idx));
-                            }}
-                            className="px-3 py-1.5 bg-indigo-600 text-white text-[10px] font-bold rounded-lg hover:bg-indigo-700 transition-all shadow-md"
-                          >
-                            Gunakan: {item.suggestion.name}
-                          </button>
-                        </div>
-                      </div>
-                    ))}
-                  </div>
-
-                  <div className="p-6 bg-slate-50 border-t flex gap-3">
-                    <button 
-                      onClick={() => {
-                        const manualItems = importSuggestions.map(s => ({...s, productId: null, itemGroupName: 'Manual'}));
-                        setCart([...cart, ...manualItems]);
-                        setImportSuggestions([]);
-                      }}
-                      className="flex-1 py-3 text-xs font-bold text-slate-400 uppercase tracking-widest hover:text-slate-600"
-                    >
-                      Abaikan Semua
-                    </button>
-                  </div>
-                </div>
-              </div>
-            )}
+            
+            <div className="p-5 bg-white border-t border-slate-100">
+              <button onClick={() => { const manualItems = importSuggestions.map(s => ({...s, productId: null, isNew: true})); setCart(prev => [...prev, ...manualItems]); setImportSuggestions([]); }} className="w-full py-3 text-[10px] font-bold text-slate-400 uppercase tracking-[0.2em] hover:text-slate-800 transition-colors hover:bg-slate-50 rounded-lg">Ignore & Add as New</button>
+            </div>
           </div>
         </div>
       )}
