@@ -1,37 +1,102 @@
+/* eslint-disable react/no-unescaped-entities */
 'use client';
-import PrNotificationBadge from '@/app/purchasing/PrNotificationBadge';
 import Link from 'next/link';
+import { 
+  ClipboardList, 
+  ShoppingCart, 
+  Truck, 
+  ArrowRight,
+  ShieldCheck
+} from 'lucide-react';
+
+/* --- IMPORT KOMPONEN UI GLOBAL --- */
+import PageHeader from '@/components/ui/PageHeader';
+import AnimatedWrapper from '@/components/ui/AnimatedWrapper';
+import BentoCard from '@/components/ui/BentoCard';
+/* --- AKHIR IMPORT --- */
 
 export default function PurchasingDashboard() {
   return (
-    <div className="p-8 font-sans">
-      <div className="flex justify-between items-center mb-8">
-        <h1 className="text-3xl font-bold text-gray-800">Purchasing Dashboard</h1>
-        <div className="flex items-center gap-2 bg-red-50 p-3 rounded-lg border border-red-200">
-          <span className="text-sm font-medium text-red-700">Permintaan Baru:</span>
-          <PrNotificationBadge />
+    <div className="p-4 md:p-8 max-w-[1400px] mx-auto min-h-screen space-y-6">
+      
+      {/* --- HEADER SECTION --- */}
+      <PageHeader 
+        title="Purchasing" 
+        highlight="Dashboard" 
+        description="Pusat kontrol operasional untuk manajemen Purchase Request dan penerbitan Purchase Order."
+        moduleName="Procurement"
+        icon={<ShieldCheck size={14} className="text-indigo-600" />}
+      />
+      {/* --- AKHIR HEADER SECTION --- */}
+
+
+      {/* --- MENU CARDS SECTION --- */}
+      <AnimatedWrapper delay="300">
+        <div className="grid grid-cols-1 md:grid-cols-3 gap-6">
+          
+          {/* --- KARTU: PURCHASE REQUEST --- */}
+          <Link href="/dashboard/purchasing/pr" className="group">
+            <BentoCard className="h-full hover:shadow-xl hover:shadow-indigo-500/10 transition-all duration-300 border-transparent hover:border-indigo-100 flex flex-col justify-between group-hover:-translate-y-1">
+              <div>
+                <div className="w-12 h-12 rounded-2xl bg-blue-50 text-blue-600 flex items-center justify-center mb-6 group-hover:scale-110 transition-transform duration-300">
+                  <ClipboardList size={24} />
+                </div>
+                <h2 className="text-xl font-bold text-slate-800 mb-2">List Request (PR)</h2>
+                <p className="text-slate-500 text-sm font-medium leading-relaxed">
+                  Tinjau, filter, dan tetapkan supplier untuk permintaan barang dari seluruh outlet operasional.
+                </p>
+              </div>
+              <div className="mt-8 flex items-center gap-2 text-xs font-bold text-blue-600 uppercase tracking-widest">
+                Kelola Request <ArrowRight size={14} className="group-hover:translate-x-1 transition-transform" />
+              </div>
+            </BentoCard>
+          </Link>
+          {/* --- AKHIR KARTU: PURCHASE REQUEST --- */}
+
+
+          {/* --- KARTU: PURCHASE ORDER --- */}
+          <Link href="/dashboard/purchasing/po" className="group">
+            <BentoCard className="h-full hover:shadow-xl hover:shadow-indigo-500/10 transition-all duration-300 border-transparent hover:border-indigo-100 flex flex-col justify-between group-hover:-translate-y-1">
+              <div>
+                <div className="w-12 h-12 rounded-2xl bg-emerald-50 text-emerald-600 flex items-center justify-center mb-6 group-hover:scale-110 transition-transform duration-300">
+                  <ShoppingCart size={24} />
+                </div>
+                <h2 className="text-xl font-bold text-slate-800 mb-2">Purchase Order (PO)</h2>
+                <p className="text-slate-500 text-sm font-medium leading-relaxed">
+                  Proses draf PO, terbitkan order resmi ke vendor, dan pantau status real-time.
+                </p>
+              </div>
+              <div className="mt-8 flex items-center gap-2 text-xs font-bold text-emerald-600 uppercase tracking-widest">
+                Buat Order <ArrowRight size={14} className="group-hover:translate-x-1 transition-transform" />
+              </div>
+            </BentoCard>
+          </Link>
+          {/* --- AKHIR KARTU: PURCHASE ORDER --- */}
+
+
+          {/* --- KARTU: RECEIVING --- */}
+          <Link href="/dashboard/outlet/receiving" className="group">
+            <BentoCard className="h-full hover:shadow-xl hover:shadow-indigo-500/10 transition-all duration-300 border-transparent hover:border-indigo-100 flex flex-col justify-between group-hover:-translate-y-1">
+              <div>
+                <div className="w-12 h-12 rounded-2xl bg-purple-50 text-purple-600 flex items-center justify-center mb-6 group-hover:scale-110 transition-transform duration-300">
+                  <Truck size={24} />
+                </div>
+                <h2 className="text-xl font-bold text-slate-800 mb-2">Receiving</h2>
+                <p className="text-slate-500 text-sm font-medium leading-relaxed">
+                  Konfirmasi kedatangan fisik barang dari supplier berdasarkan nomor Surat Jalan (SJ).
+                </p>
+              </div>
+              <div className="mt-8 flex items-center gap-2 text-xs font-bold text-purple-600 uppercase tracking-widest">
+                Terima Barang <ArrowRight size={14} className="group-hover:translate-x-1 transition-transform" />
+              </div>
+            </BentoCard>
+          </Link>
+          {/* --- AKHIR KARTU: RECEIVING --- */}
+
         </div>
-      </div>
-
-      <div className="grid grid-cols-1 md:grid-cols-3 gap-6">
-        {/* Card Purchase Request */}
-        <Link href="/dashboard/purchasing/pr-list" className="p-6 border rounded-xl hover:shadow-lg transition bg-white">
-          <h2 className="text-xl font-semibold mb-2 text-blue-600">Purchase Request (PR)</h2>
-          <p className="text-gray-600 text-sm">Ceklis dan filter barang yang diminta produksi.</p>
-        </Link>
-
-        {/* Card Purchase Order */}
-        <Link href="/dashboard/purchasing/create-po" className="p-6 border rounded-xl hover:shadow-lg transition bg-white">
-          <h2 className="text-xl font-semibold mb-2 text-green-600">Create PO</h2>
-          <p className="text-gray-600 text-sm">Buat order resmi dan kirim otomatis via WhatsApp.</p>
-        </Link>
-
-        {/* Card Receiving */}
-        <Link href="/dashboard/purchasing/receiving" className="p-6 border rounded-xl hover:shadow-lg transition bg-white">
-          <h2 className="text-xl font-semibold mb-2 text-purple-600">Receiving</h2>
-          <p className="text-gray-600 text-sm">Konfirmasi barang datang & upload foto surat jalan.</p>
-        </Link>
-      </div>
+      </AnimatedWrapper>
+      {/* --- AKHIR MENU CARDS SECTION --- */}
+      
     </div>
   );
 }

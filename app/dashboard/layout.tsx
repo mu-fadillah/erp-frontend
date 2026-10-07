@@ -2,108 +2,107 @@
 'use client';
 import React, { useState, useEffect, useCallback } from 'react';
 import Link from 'next/link';
-import { usePathname } from 'next/navigation';
+import { usePathname, useRouter } from 'next/navigation';
+import { Toaster } from 'react-hot-toast'; // <-- TAMBAHAN GLOBAL TOAST
+import { fetchApi } from '../utils/api'; // <-- TAMBAHAN GLOBAL API FETCH
 import { 
-  LayoutDashboard, 
-  ClipboardList, 
-  Truck, 
-  ShoppingCart, 
-  Database, 
-  Store, 
-  Factory, 
-  ChevronDown, 
-  Bell, 
-  Users,
-  PieChart,
-  Wallet,
-  Menu,
-  Activity,
-  BarChart3,
-  Settings2,
-  Package,
-  History,
-  ChefHat,
-  BarChartHorizontal
+  LayoutDashboard, ClipboardList, Truck, ShoppingCart, 
+  Store, Factory, ChevronDown, Bell, Users, Wallet,
+  Menu, Activity, BarChart3, Settings2, Package, History,
+  ChefHat, BarChartHorizontal, LogOut 
 } from 'lucide-react';
 
 interface NavItem {
-  name: string;
-  path: string;
-  icon: React.ReactNode;
-  badge?: number;
-  empty?: boolean;
+  name: string; path: string; icon: React.ReactNode;
+  badge?: number; empty?: boolean; permission?: string;
 }
 
 interface NavGroup {
-  group: string;
-  items: NavItem[];
+  group: string; items: NavItem[];
 }
 
 export default function DashboardLayout({ children }: { children: React.ReactNode }) {
   const pathname = usePathname();
+  const router = useRouter();
   const [prCount, setPrCount] = useState(0);
   const [isSidebarOpen, setIsSidebarOpen] = useState(true);
+  const [user, setUser] = useState<any>(null);
 
-  // --- CONFIG NAVIGASI ---
+  useEffect(() => {
+    const storedUser = localStorage.getItem('user');
+    if (storedUser) setUser(JSON.parse(storedUser));
+  }, []);
+
+  const handleLogout = () => {
+    document.cookie = 'token=; path=/; expires=Thu, 01 Jan 1970 00:00:01 GMT;';
+    localStorage.removeItem('user');
+    router.push('/');
+    router.refresh();
+  };
+
+  const canAccess = useCallback((permissionCode?: string) => {
+    if (!user) return false;
+    if (user.role === 'SUPERADMIN' || user.role === 'OFFICE') return true;
+    if (!permissionCode) return false;
+    return user.permissions?.includes(permissionCode);
+  }, [user]);
+
   const navigation: NavGroup[] = [
     {
       group: 'FINANCE & ACCOUNTING',
       items: [
-        { name: 'Financial Report', path: '/dashboard/finance/accounting', icon: <Wallet size={18} />, empty: true },
-        { name: 'Sales Analysis', path: '/dashboard/finance/sales', icon: <BarChart3 size={18} />, empty: true },
+        { name: 'Financial Report', path: '/dashboard/finance/accounting', icon: <Wallet size={18} />, empty: true, permission: 'finance-report' },
+        { name: 'Sales Analysis', path: '/dashboard/finance/sales', icon: <BarChart3 size={18} />, empty: true, permission: 'finance-sales' },
       ]
     },
     {
       group: 'PURCHASING',
       items: [
-        { name: 'List Request', path: '/dashboard/purchasing/pr', icon: <ClipboardList size={18} />, badge: prCount },
-        { name: 'Purchase Order', path: '/dashboard/purchasing/po', icon: <ShoppingCart size={18} /> },
+        { name: 'List Request', path: '/dashboard/purchasing/pr', icon: <ClipboardList size={18} />, badge: prCount, permission: 'purchasing-pr' },
+        { name: 'Purchase Order', path: '/dashboard/purchasing/po', icon: <ShoppingCart size={18} />, permission: 'purchasing-po' },
       ]
     },
     {
       group: 'INVENTORY',
       items: [
-        { name: 'Item List', path: '/dashboard/inventory/itemlist', icon: <Package size={18} /> },
-        { name: 'Inventory Adjustment', path: '/dashboard/inventory/adjust', icon: <History size={18} />, },
-        { name: 'Menu List', path: '/dashboard/inventory/recipe', icon: <Package size={18} /> },
+        { name: 'Item List', path: '/dashboard/inventory/itemlist', icon: <Package size={18} />, permission: 'inventory-item' },
+        { name: 'Inventory Adjustment', path: '/dashboard/inventory/adjust', icon: <History size={18} />, permission: 'inventory-adjust' },
+        { name: 'Menu List', path: '/dashboard/inventory/recipe', icon: <Package size={18} />, permission: 'inventory-recipe' },
       ]
     },
     {
       group: 'PRODUCTION',
       items: [
-        { name: 'Kitchen Production', path: '/dashboard/production', icon: <ChefHat size={18} />, empty: true },
+        { name: 'Kitchen Production', path: '/dashboard/production', icon: <ChefHat size={18} />, empty: true, permission: 'production-kitchen' },
       ]
     },
     {
       group: 'ADMIN OUTLET',
       items: [
-        { name: 'Request Order', path: '/dashboard/outlet/request', icon: <LayoutDashboard size={18} /> },
-        { name: 'Receiving', path: '/dashboard/outlet/receiving', icon: <Truck size={18} /> },
+        { name: 'Request Order', path: '/dashboard/outlet/request', icon: <LayoutDashboard size={18} />, permission: 'outlet-request' },
+        { name: 'Receiving', path: '/dashboard/outlet/receiving', icon: <Truck size={18} />, permission: 'outlet-receiving' },
       ]
     },
     {
       group: 'REPORT NAVIGASI',
       items: [
-        { name: 'Report In (Barang Masuk)', path: '/dashboard/report/in', icon: <BarChartHorizontal size={18} /> },
+        { name: 'Report In (Barang Masuk)', path: '/dashboard/report/in', icon: <BarChartHorizontal size={18} />, permission: 'report-in' },
       ]
     },
     {
       group: 'SETUP SYSTEM',
       items: [
-        { name: 'Outlet Management', path: '/dashboard/setup/outlet', icon: <Store size={18} /> }, 
-        { name: 'Supplier Management', path: '/dashboard/setup/supplier', icon: <Factory size={18} /> },
-        { name: 'User Management', path: '/dashboard/setup/users', icon: <Users size={18} />, empty: true },
+        { name: 'Outlet Management', path: '/dashboard/setup/outlet', icon: <Store size={18} />, permission: 'setup-outlet' }, 
+        { name: 'Supplier Management', path: '/dashboard/setup/supplier', icon: <Factory size={18} />, permission: 'setup-supplier' },
+        { name: 'User Management', path: '/dashboard/setup/users', icon: <Users size={18} />, permission: 'setup-users' },
       ]
     }
   ];
 
-  // --- LOGIKA OPEN/CLOSE GROUPS ---
   const [openGroups, setOpenGroups] = useState<{ [key: string]: boolean }>(() => {
     const initialOpen: { [key: string]: boolean } = {};
     navigation.forEach(nav => {
-      if (nav.items.some(item => pathname === item.path)) {
-        initialOpen[nav.group] = true;
-      }
+      if (nav.items.some(item => pathname === item.path)) initialOpen[nav.group] = true;
     });
     return initialOpen;
   });
@@ -112,44 +111,48 @@ export default function DashboardLayout({ children }: { children: React.ReactNod
     setOpenGroups(prev => ({ ...prev, [groupName]: !prev[groupName] }));
   };
 
-  // --- LOGIKA FETCH NOTIFIKASI ---
   const fetchNotifications = useCallback(async () => {
+    if (!user) return;
+    const hasPermission = user.role === 'SUPERADMIN' || user.role === 'OFFICE' || user.permissions?.includes('purchasing-pr');
+    if (!hasPermission) return;
+
     try {
-      const res = await fetch(`http://localhost:3000/purchasing/pr/pending?t=${Date.now()}`); 
-      
-      if (!res.ok) return; // Hindari memproses jika response error
+      // --- PERBAIKAN: Gunakan fungsi fetchApi global (Lebih bersih) ---
+      const res = await fetchApi(`/purchasing/pr/pending?t=${Date.now()}`); 
+      if (!res.ok) return;
 
       const data = await res.json();
       if (Array.isArray(data)) {
         const pendingCount = data.filter((item: any) => !item.isChecked).length;
-        
-        // Hanya update state jika jumlahnya berbeda untuk menghindari render berulang
-        setPrCount(prev => {
-          if (prev !== pendingCount) return pendingCount;
-          return prev;
-        });
+        setPrCount(prev => (prev !== pendingCount ? pendingCount : prev));
       }
     } catch (err) {
-      console.error("Gagal mengambil notifikasi:", err);
+      // Silent error
     }
-  }, []);
+  }, [user]);
 
   useEffect(() => {
-    // Jalankan fetch pertama kali setelah komponen mount
-    const timer = setTimeout(() => {
-      fetchNotifications();
-    }, 0);
-
+    const timer = setTimeout(() => fetchNotifications(), 0);
     const interval = setInterval(fetchNotifications, 15000);
-    
-    return () => {
-      clearTimeout(timer);
-      clearInterval(interval);
-    };
+    return () => { clearTimeout(timer); clearInterval(interval); };
   }, [fetchNotifications]);
+
+  if (!user) {
+    return <div className="h-screen w-full bg-slate-50 flex items-center justify-center">Loading...</div>;
+  }
 
   return (
     <div className="flex h-screen bg-slate-50 font-sans text-slate-900 overflow-hidden">
+      
+      {/* --- TAMBAHAN: Global Toaster Notification --- */}
+      <Toaster 
+        position="top-right" 
+        toastOptions={{ 
+          className: 'text-sm font-semibold',
+          duration: 3000,
+        }} 
+      />
+
       {/* Sidebar */}
       <aside className={`${isSidebarOpen ? 'w-72' : 'w-20'} bg-slate-950 text-slate-300 flex flex-col transition-all duration-300 z-20`}>
         <div className="h-20 flex items-center px-6 border-b border-slate-900">
@@ -158,7 +161,7 @@ export default function DashboardLayout({ children }: { children: React.ReactNod
           </div>
           {isSidebarOpen && (
             <div className="ml-4 overflow-hidden">
-              <h1 className="text-sm font-black tracking-widest text-white uppercase">CAMDEN</h1>
+              <h1 className="text-sm font-black tracking-widest text-white uppercase">LookDeep</h1>
               <p className="text-[9px] font-bold text-indigo-400 tracking-tighter uppercase">Inventory System</p>
             </div>
           )}
@@ -166,20 +169,21 @@ export default function DashboardLayout({ children }: { children: React.ReactNod
         
         <nav className="flex-1 p-4 space-y-2 overflow-y-auto custom-scrollbar">
           {navigation.map((section) => {
+            const allowedItems = section.items.filter(item => canAccess(item.permission));
+            if (allowedItems.length === 0) return null;
+
             const isOpen = openGroups[section.group];
             return (
               <div key={section.group} className="space-y-1">
                 {isSidebarOpen && (
                   <button onClick={() => toggleGroup(section.group)} className="w-full flex items-center justify-between px-3 py-4 mt-2 group">
-                    <h3 className="text-[9px] font-black text-slate-500 uppercase tracking-widest group-hover:text-slate-400">
-                      {section.group}
-                    </h3>
+                    <h3 className="text-[9px] font-black text-slate-500 uppercase tracking-widest group-hover:text-slate-400">{section.group}</h3>
                     <ChevronDown size={12} className={`transition-transform ${isOpen ? 'rotate-180' : ''}`} />
                   </button>
                 )}
 
                 <div className={`space-y-1 ${isSidebarOpen && !isOpen ? 'hidden' : 'block'}`}>
-                  {section.items.map((item) => {
+                  {allowedItems.map((item) => {
                     const isActive = pathname === item.path;
                     return (
                       <Link 
@@ -215,21 +219,29 @@ export default function DashboardLayout({ children }: { children: React.ReactNod
             <button onClick={() => setIsSidebarOpen(!isSidebarOpen)} className="p-2.5 hover:bg-slate-50 rounded-xl text-slate-400">
               <Menu size={20} />
             </button>
-            <div className="h-6 w-[px] bg-slate-200"></div>
+            <div className="h-6 w-[1px] bg-slate-200"></div>
             <div>
-              <h2 className="text-[9px] font-black text-slate-400 uppercase tracking-widest mb-0.5">
-                {sectionName(pathname)}
-              </h2>
-              <p className="text-base font-black text-slate-900 uppercase">
-                {pathname.split('/').pop()?.replace('-', ' ')}
-              </p>
+              <h2 className="text-[9px] font-black text-slate-400 uppercase tracking-widest mb-0.5">{sectionName(pathname)}</h2>
+              <p className="text-base font-black text-slate-900 uppercase">{pathname.split('/').pop()?.replace('-', ' ')}</p>
             </div>
           </div>
+          
           <div className="flex items-center gap-4">
-             <Activity size={16} className="text-indigo-600" />
-             <button className="relative p-2.5 text-slate-400">
+            <div className="hidden md:flex flex-col items-end mr-4">
+              <span className="text-xs font-bold text-slate-800 uppercase">{user.username}</span>
+              <span className="text-[10px] font-black text-indigo-500 uppercase tracking-wider">{user.role}</span>
+            </div>
+            
+            <Activity size={16} className="text-indigo-600" />
+            <button className="relative p-2.5 text-slate-400">
               <Bell size={20} />
               {prCount > 0 && <span className="absolute top-2.5 right-2.5 h-2 w-2 bg-indigo-600 rounded-full border border-white"></span>}
+            </button>
+            
+            <div className="h-6 w-[1px] bg-slate-200"></div>
+            
+            <button onClick={handleLogout} className="p-2.5 text-slate-400 hover:text-red-500 hover:bg-red-50 rounded-xl transition-colors flex items-center gap-2" title="Keluar">
+              <LogOut size={20} />
             </button>
           </div>
         </header>

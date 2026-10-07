@@ -1,33 +1,34 @@
 /* eslint-disable @typescript-eslint/no-explicit-any */
 'use client';
-import { useState, useEffect, useCallback, useMemo } from 'react';
-import { 
-  Package, 
-  RefreshCcw, 
-  ChevronRight,
-  ChevronDown,
-  ChevronUp,
-  Loader2,
-  ListChecks,
-  XCircle,
-  Building2,
-  ClipboardCheck,
-  MapPin,
-  Calendar // Pastikan ini di-import
-} from 'lucide-react';
 
+import { useState, useEffect, useCallback } from 'react';
+import { 
+  Package, RefreshCcw, ChevronRight, ChevronDown, ChevronUp,
+  Loader2, ListChecks, XCircle, Building2, ClipboardCheck,
+  MapPin, Calendar, Box, FileSpreadsheet
+} from 'lucide-react';
+import toast from 'react-hot-toast'; 
+import { fetchApi } from '../../../utils/api'; 
+
+/* --- UI COMPONENTS IMPORT --- */
+import PageHeader from '@/components/ui/PageHeader';
+import AnimatedWrapper from '@/components/ui/AnimatedWrapper';
+import BentoCard from '@/components/ui/BentoCard';
+import EmptyState from '@/components/ui/EmptyState';
+import StatusBadge from '@/components/ui/StatusBadge'; 
+/* --- AKHIR UI COMPONENTS IMPORT --- */
+
+/* --- INTERFACES --- */
 interface PurchasingItem {
   id: string;
   product: { name: string; code: string; sku?: string };
   quantity: number;
   receivedQuantity: number;
+  notes?: string;
   uom?: string;
   prItem?: {
-    purchaseRequest?: {
-      outlet?: {
-        name: string;
-      };
-    };
+    createdAt: string;
+    purchaseRequest?: { outlet?: { name: string } };
   };
 }
 
@@ -35,284 +36,302 @@ interface POData {
   id: string;
   orderNumber: string;
   status: string;
+  createdAt: string;
   supplier: { name: string };
   outlet?: { name: string }; 
   items: PurchasingItem[];
 }
+/* --- AKHIR INTERFACES --- */
 
-interface ReceiveInput {
-  amount: number;
-  notes: string;
-}
 
 export default function ReceivingPage() {
+  // --- STATE MANAGEMENT ---
   const [activePOs, setActivePOs] = useState<POData[]>([]);
   const [loading, setLoading] = useState(true);
-  const [receiveData, setReceiveData] = useState<{ [key: string]: ReceiveInput }>({});
-  const [expandedPOs, setExpandedPOs] = useState<{ [key: string]: boolean }>({});
   
-  const API_URL = 'http://localhost:3000';
+  // KOREKSI: Tambahkan string kosong pada type amount untuk memfasilitasi input yang dihapus
+  const [receiveData, setReceiveData] = useState<{ [key: string]: { amount: number | ''; notes: string } }>({});
+  
+  const [suratJalan, setSuratJalan] = useState<{ [key: string]: string }>({});
+  const [expandedPOs, setExpandedPOs] = useState<{ [key: string]: boolean }>({});
+  // --- AKHIR STATE MANAGEMENT ---
 
+
+  // --- FETCH DATA (API CALLS) ---
   const fetchActivePOs = useCallback(async () => {
     try {
       setLoading(true);
-      const res = await fetch(`${API_URL}/purchasing/po/list?status=SENT`);
-      if (!res.ok) throw new Error("Gagal mengambil data");
+      
+      const res = await fetchApi('/purchasing/po/list?status=SENT');
       const data = await res.json();
       
-      // Filter status SENT dan urutkan PO berdasarkan Order Number
+      if (!Array.isArray(data)) {
+        setActivePOs([]);
+        return;
+      }
+
       const onlySent = data
         .filter((po: any) => po.status === 'SENT')
+        .map((po: any) => ({
+          ...po,
+          // MODIFIKASI KRUSIAL: Sembunyikan item yang sudah pernah diproses.
+          // Item dianggap "Selesai" jika receivedQuantity > 0 ATAU user sudah memberi notes
+          items: po.items.filter((item: any) => item.receivedQuantity === 0 && (!item.notes || item.notes.trim() === ''))
+        }))
+        // Jangan tampilkan Kartu PO yang semua itemnya sudah selesai diproses
+        .filter((po: any) => po.items.length > 0)
         .sort((a: any, b: any) => b.orderNumber.localeCompare(a.orderNumber));
-
+      
       setActivePOs(onlySent);
     } catch (err) {
-      console.error("Error fetching POs:", err);
+      toast.error("Gagal memuat data pengiriman.");
+      setActivePOs([]); 
     } finally {
       setLoading(false);
     }
-  }, [API_URL]);
+  }, []);
 
-  useEffect(() => {
-    fetchActivePOs();
+  useEffect(() => { 
+    fetchActivePOs(); 
   }, [fetchActivePOs]);
+  // --- AKHIR FETCH DATA ---
 
-  const togglePO = (poId: string) => {
-    setExpandedPOs(prev => ({ ...prev, [poId]: !prev[poId] }));
-  };
 
+  // --- EVENT HANDLERS ---
   const handleMatchAll = (po: POData) => {
     const updates = { ...receiveData };
     po.items.forEach(item => {
-      const remaining = item.quantity - item.receivedQuantity;
-      if (remaining > 0) {
-        updates[item.id] = { amount: remaining, notes: '' };
-      }
+      // Karena item sudah ter-filter otomatis, kita bisa pastikan semuanya belum diproses
+      updates[item.id] = { amount: item.quantity, notes: '' };
     });
     setReceiveData(updates);
   };
 
-  const handleClearAll = (po: POData) => {
-    const updates = { ...receiveData };
-    po.items.forEach(item => {
-      delete updates[item.id];
-    });
-    setReceiveData(updates);
-  };
-
-  const handleInputChange = (itemId: string, field: keyof ReceiveInput, value: string) => {
+  const handleInputChange = (itemId: string, field: 'amount' | 'notes', value: string) => {
     setReceiveData(prev => ({
       ...prev,
       [itemId]: {
-        ...(prev[itemId] || { amount: 0, notes: '' }),
-        [field]: field === 'amount' ? (parseInt(value) || 0) : value
+        ...(prev[itemId] || { amount: '', notes: '' }),
+        [field]: field === 'amount' ? (value === '' ? '' : Math.max(0, parseInt(value) || 0)) : value
       }
     }));
   };
+  // --- AKHIR EVENT HANDLERS ---
 
+
+  // --- SUBMISSION LOGIC ---
   const submitReceiving = async (poId: string) => {
+    const sjNumber = suratJalan[poId];
+    if (!sjNumber?.trim()) {
+      return toast.error("Nomor Surat Jalan (SJ) wajib diisi!");
+    }
+
     const po = activePOs.find(p => p.id === poId);
     if (!po) return;
 
-    const itemsToSubmit = po.items
-      .filter(item => (receiveData[item.id]?.amount || 0) > 0)
-      .map(item => ({
+    const itemsToSubmit: any[] = [];
+    
+    // Validasi super ketat sebelum kirim ke backend
+    for (const item of po.items) {
+      const rData = receiveData[item.id];
+      // Skip jika inputan belum disentuh atau dikosongkan
+      if (!rData || rData.amount === '') continue;
+
+      const amountNum = Number(rData.amount);
+
+      // MODIFIKASI KRUSIAL: Wajib isi notes jika barang yang diterima selisih!
+      if (amountNum !== item.quantity && rData.notes.trim() === '') {
+        return toast.error(`Alasan selisih wajib diisi untuk item: ${item.product?.name}`);
+      }
+
+      itemsToSubmit.push({
         itemId: item.id,
-        amount: receiveData[item.id].amount,
-        notes: receiveData[item.id].notes || ''
-      }));
+        amount: amountNum,
+        notes: rData.notes || ''
+      });
+    }
 
     if (itemsToSubmit.length === 0) {
-      alert("Masukkan jumlah barang yang diterima!");
-      return;
+      return toast.error("Input jumlah barang yang diterima!");
     }
-
-    if (!confirm(`Konfirmasi penerimaan ${itemsToSubmit.length} item? Tanggal hari ini akan dicatat sebagai waktu penerimaan.`)) return;
+    
+    if (!confirm(`Konfirmasi penerimaan SJ: ${sjNumber}?`)) return;
 
     try {
-      const res = await fetch(`${API_URL}/purchasing/po/receive`, {
+      const res = await fetchApi('/purchasing/po/receive', {
         method: 'PATCH',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ items: itemsToSubmit })
+        body: JSON.stringify({ items: itemsToSubmit, referenceNo: sjNumber })
       });
-
-      if (!res.ok) throw new Error("Gagal submit");
-
-      alert("Penerimaan barang berhasil dicatat!");
-      setReceiveData({});
-      fetchActivePOs(); 
-    } catch (err) {
-      alert("Terjadi kesalahan saat memproses penerimaan.");
+      
+      if (res.ok) {
+        toast.success("Barang berhasil diterima!");
+        setReceiveData({});
+        setSuratJalan(prev => { const n = {...prev}; delete n[poId]; return n; });
+        fetchActivePOs(); // Fetch data terbaru agar item yang disubmit langsung "hilang"
+      } else {
+        const errorData = await res.json();
+        toast.error(`Gagal: ${errorData.message || "Terjadi kesalahan server"}`);
+      }
+    } catch (err) { 
+      toast.error("Kesalahan saat memproses permintaan."); 
     }
   };
+  // --- AKHIR SUBMISSION LOGIC ---
+
 
   return (
-    <div className="p-4 md:p-8 max-w-6xl mx-auto bg-slate-50 min-h-screen pb-32">
-      <div className="flex justify-between items-center mb-10">
-        <div>
-          <h1 className="text-3xl font-black text-slate-900 tracking-tight text-[10px] uppercase tracking-[0.2em]">Receiving</h1>
-          <p className="text-[11px] font-bold text-slate-500 uppercase tracking-widest mt-1">Konfirmasi Stok Masuk per Item & Outlet</p>
-        </div>
-        <button 
-          onClick={fetchActivePOs}
-          className="p-3 bg-white border border-slate-200 rounded-2xl text-slate-400 hover:text-orange-600 transition-colors shadow-sm"
+    <div className="min-h-screen bg-[#F8FAFC] font-sans text-slate-600">
+      <div className="w-full p-4 md:p-5 pb-24 space-y-5">
+
+        {/* --- HEADER SECTION --- */}
+        <PageHeader 
+          title="Warehouse" highlight="Receiving" 
+          description="Confirm incoming stock from suppliers."
+          moduleName="Inventory Management"
+          icon={<Box size={14} className="text-orange-600" />}
         >
-          <RefreshCcw size={20} className={loading ? 'animate-spin' : ''} />
-        </button>
-      </div>
+          <button onClick={fetchActivePOs} className="p-2.5 bg-white border border-slate-200 rounded-xl text-slate-400 hover:text-orange-600 shadow-sm transition-all">
+            <RefreshCcw size={18} className={loading ? 'animate-spin' : ''} />
+          </button>
+        </PageHeader>
+        {/* --- AKHIR HEADER SECTION --- */}
 
-      <div className="space-y-6">
-        {loading ? (
-          <div className="flex flex-col items-center justify-center p-20">
-            <Loader2 className="animate-spin text-orange-600 mb-4" size={40} />
-            <p className="text-[10px] font-black uppercase tracking-[0.2em] text-slate-400">Loading Warehouse Data...</p>
-          </div>
-        ) : activePOs.length === 0 ? (
-          <div className="bg-white p-20 rounded-[40px] text-center border-2 border-dashed border-slate-200">
-             <Package size={40} className="text-slate-200 mx-auto mb-4" />
-             <p className="text-slate-400 font-bold text-sm uppercase">Belum ada PO untuk diterima.</p>
-          </div>
-        ) : (
-          activePOs.map((po) => {
-            const isExpanded = expandedPOs[po.id] || false;
+
+        {/* --- MAIN CONTENT WRAPPER --- */}
+        <AnimatedWrapper delay="500">
+          {loading ? (
+             <EmptyState icon={<Loader2 size={48} className="animate-spin text-orange-500" />} title="Syncing Inventory..." />
+          ) : activePOs.length === 0 ? (
+             <EmptyState icon={<Package size={56} />} title="No pending deliveries" />
+          ) : (
             
-            // LOGIKA SORTIR: Mengurutkan item berdasarkan nama outlet secara ascending
-            const sortedItems = [...po.items].sort((a, b) => {
-              const outletA = a.prItem?.purchaseRequest?.outlet?.name || po.outlet?.name || 'Central';
-              const outletB = b.prItem?.purchaseRequest?.outlet?.name || po.outlet?.name || 'Central';
-              return outletA.localeCompare(outletB);
-            });
-
-            return (
-              <div key={po.id} className="bg-white rounded-3xl shadow-sm border border-slate-200 overflow-hidden">
-                <div 
-                  onClick={() => togglePO(po.id)}
-                  className="p-5 flex flex-col md:flex-row md:items-center justify-between cursor-pointer hover:bg-slate-50 transition-colors gap-4"
-                >
-                  <div className="flex items-center gap-4">
-                    <div className={`w-12 h-12 rounded-2xl flex items-center justify-center transition-all ${isExpanded ? 'bg-orange-600 text-white shadow-lg shadow-orange-200' : 'bg-slate-100 text-slate-400'}`}>
-                      <Building2 size={24} />
-                    </div>
-                    <div>
-                      <div className="flex items-center gap-2">
-                        <span className="text-[9px] font-black bg-slate-900 text-white px-2 py-0.5 rounded uppercase tracking-tighter">{po.orderNumber}</span>
-                        <h2 className="text-sm font-black text-slate-800 uppercase tracking-tight text-[10px] uppercase tracking-[0.2em]">{po.supplier?.name}</h2>
+            /* --- DAFTAR PO AKTIF --- */
+            <div className="space-y-5">
+              {activePOs.map((po) => {
+                const isExpanded = expandedPOs[po.id] || false;
+                return (
+                  <BentoCard key={po.id} noPadding>
+                    
+                    {/* ACCORDION HEADER */}
+                    <div onClick={() => setExpandedPOs(p => ({...p, [po.id]: !isExpanded}))} className="p-5 flex flex-col md:flex-row md:items-center justify-between cursor-pointer hover:bg-slate-50/50 gap-4">
+                      <div className="flex items-center gap-4">
+                        <div className={`w-12 h-12 rounded-xl flex items-center justify-center transition-all ${isExpanded ? 'bg-orange-500 text-white shadow-md' : 'bg-slate-100 text-slate-400'}`}>
+                          <Building2 size={24} />
+                        </div>
+                        <div>
+                          <div className="flex items-center gap-2">
+                            <span className="text-[10px] font-bold bg-slate-900 text-white px-2 py-0.5 rounded-md uppercase tracking-wider">{po.orderNumber}</span>
+                            <h2 className="text-sm font-bold text-slate-800 uppercase tracking-tight">{po.supplier?.name}</h2>
+                          </div>
+                          <p className="text-[10px] text-slate-500 font-semibold mt-1 uppercase tracking-widest">{po.items.length} Items Pending</p>
+                        </div>
                       </div>
-                      <p className="text-[10px] text-slate-400 font-bold mt-0.5 uppercase tracking-tight">{po.items.length} Items dalam pengiriman ini</p>
-                    </div>
-                  </div>
-                  
-                  <div className="flex items-center gap-3">
-                    {isExpanded && (
-                      <div className="flex items-center gap-2 mr-4">
-                        <button onClick={(e) => { e.stopPropagation(); handleMatchAll(po); }} className="flex items-center gap-1 text-[10px] font-black text-emerald-600 hover:bg-emerald-50 px-3 py-1.5 rounded-lg transition-colors border border-emerald-100 uppercase tracking-tight text-[10px] uppercase tracking-[0.2em]">
-                          <ListChecks size={14} /> MATCH ALL
-                        </button>
-                        <button onClick={(e) => { e.stopPropagation(); handleClearAll(po); }} className="flex items-center gap-1 text-[10px] font-black text-slate-400 hover:bg-slate-100 px-3 py-1.5 rounded-lg transition-colors border border-slate-100 uppercase tracking-tight text-[10px] uppercase tracking-[0.2em]">
-                          <XCircle size={14} /> CLEAR
-                        </button>
+                      <div className="flex items-center gap-3">
+                        {isExpanded && (
+                          <div className="flex items-center gap-2">
+                            <button onClick={(e) => { e.stopPropagation(); handleMatchAll(po); }} className="text-[10px] font-bold text-emerald-600 border border-emerald-100 px-3 py-1.5 rounded-lg hover:bg-emerald-50 transition-all uppercase flex items-center gap-1"><ListChecks size={14}/> Match All</button>
+                            <button onClick={(e) => { e.stopPropagation(); setReceiveData({}); }} className="text-[10px] font-bold text-slate-400 border border-slate-200 px-3 py-1.5 rounded-lg hover:bg-slate-100 transition-all uppercase flex items-center gap-1"><XCircle size={14}/> Clear</button>
+                          </div>
+                        )}
+                        {isExpanded ? <ChevronUp className="text-slate-400" size={20} /> : <ChevronDown className="text-slate-300" size={20} />}
                       </div>
-                    )}
-                    {isExpanded ? <ChevronUp className="text-slate-300" /> : <ChevronDown className="text-slate-300" />}
-                  </div>
-                </div>
+                    </div>
 
-                {isExpanded && (
-                  <div className="border-t border-slate-100 animate-in slide-in-from-top-2">
-                    <div className="overflow-x-auto">
-                      <table className="w-full text-left border-collapse">
-                        <thead>
-                          <tr className="bg-slate-50/50">
-                            <th className="px-6 py-4 text-[10px] font-bold text-slate-400 uppercase tracking-widest">Item & Destination</th>
-                            <th className="px-6 py-4 text-[10px] font-bold text-slate-400 uppercase tracking-widest text-center">Remaining</th>
-                            <th className="px-6 py-4 text-[10px] font-bold text-slate-400 uppercase tracking-widest text-center">Receive</th>
-                            <th className="px-6 py-4 text-[10px] font-bold text-slate-400 uppercase tracking-widest">Audit Note</th>
-                          </tr>
-                        </thead>
-                        <tbody className="divide-y divide-slate-50">
-                          {sortedItems.map((item) => {
-                            const remaining = item.quantity - item.receivedQuantity;
-                            const currentInput = receiveData[item.id]?.amount || 0;
-                            
-                            const itemOutlet = item.prItem?.purchaseRequest?.outlet?.name || po.outlet?.name || 'Central';
-
-                            if (remaining <= 0) return null;
-
-                            return (
-                              <tr key={item.id} className="group hover:bg-slate-50/30 transition-colors">
-                                <td className="px-6 py-4">
-                                  <p className="text-sm font-bold text-slate-700 uppercase tracking-tight">
-                                    {item.product?.name}
-                                  </p>
-                                  <div className="flex items-center gap-2 mt-1">
-                                    <span className="text-[9px] font-mono font-bold bg-slate-100 text-slate-500 px-1.5 py-0.5 rounded">
-                                      {item.product?.sku || item.product?.code || '-'}
-                                    </span>
-                                    <span className="flex items-center gap-1 text-[9px] font-black text-indigo-600 bg-indigo-50 px-2 py-0.5 rounded border border-indigo-100 uppercase">
-                                      <MapPin size={10} /> {itemOutlet}
-                                    </span>
-                                  </div>
-                                </td>
-                                <td className="px-6 py-4 text-center">
-                                  <span className="text-sm font-black text-orange-600">{remaining}</span>
-                                </td>
-                                <td className="px-6 py-4">
-                                  <div className="flex justify-center">
-                                    <input 
-                                      type="number"
-                                      value={receiveData[item.id]?.amount || ''}
-                                      onChange={(e) => handleInputChange(item.id, 'amount', e.target.value)}
-                                      className={`w-20 py-2 rounded-xl border-2 text-center font-black transition-all outline-none ${
-                                        currentInput > 0 ? 'border-orange-500 bg-orange-50 text-orange-600' : 'border-slate-100 bg-slate-50'
-                                      }`}
-                                      placeholder="0"
-                                    />
-                                  </div>
-                                </td>
-                                <td className="px-6 py-4">
-                                  {currentInput > 0 ? (
-                                    <div className="flex flex-col gap-1">
-                                      {currentInput !== remaining && (
-                                        <input 
-                                          type="text"
-                                          value={receiveData[item.id]?.notes || ''}
-                                          onChange={(e) => handleInputChange(item.id, 'notes', e.target.value)}
-                                          placeholder="Alasan selisih..."
-                                          className="w-full px-3 py-2 rounded-lg bg-rose-50 border border-rose-100 text-[11px] font-bold text-rose-700 outline-none"
-                                        />
-                                      )}
-                                      <div className="flex items-center gap-1 text-[9px] font-bold text-emerald-600 bg-emerald-50 px-2 py-1 rounded w-fit uppercase">
-                                        <Calendar size={10} /> {new Date().toLocaleDateString('id-ID')}
-                                      </div>
+                    {/* TABLE AREA */}
+                    <div className={`overflow-hidden transition-all duration-300 ${isExpanded ? 'max-h-[5000px] opacity-100 border-t border-slate-100' : 'max-h-0 opacity-0'}`}>
+                      <div className="overflow-x-auto">
+                        <table className="w-full text-left border-collapse">
+                          <thead>
+                            <tr className="bg-slate-50/50 text-slate-400 text-[10px] font-bold uppercase tracking-widest">
+                              <th className="px-6 py-4 w-32">Order Date</th>
+                              <th className="px-6 py-4">Item & Destination</th>
+                              <th className="px-6 py-4 text-center w-28">Requested</th>
+                              <th className="px-6 py-4 text-center w-36">Receive Qty</th>
+                              <th className="px-6 py-4">Audit Note</th>
+                            </tr>
+                          </thead>
+                          <tbody className="divide-y divide-slate-50">
+                            {po.items.map((item) => {
+                              // Item sudah 100% dijamin belum di-receive berkat filter di fetchActivePOs
+                              const requestedQty = item.quantity;
+                              
+                              return (
+                                <tr key={item.id} className="group hover:bg-slate-50/30 transition-colors">
+                                  <td className="px-6 py-5">
+                                    <div className="flex flex-col">
+                                      <span className="text-xs font-bold text-slate-600">{new Date(item.prItem?.createdAt || po.createdAt).toLocaleDateString('id-ID', { day: '2-digit', month: 'short' })}</span>
+                                      <span className="text-[9px] text-slate-400">{new Date(item.prItem?.createdAt || po.createdAt).getFullYear()}</span>
                                     </div>
-                                  ) : (
-                                    <span className="text-[10px] text-slate-300 italic flex items-center gap-1 uppercase">
-                                      Waiting for input...
-                                    </span>
-                                  )}
-                                </td>
-                              </tr>
-                            );
-                          })}
-                        </tbody>
-                      </table>
+                                  </td>
+                                  <td className="px-6 py-5">
+                                    <p className="text-sm font-bold text-slate-800 uppercase tracking-tight">{item.product?.name}</p>
+                                    <div className="flex items-center gap-2 mt-1">
+                                      <StatusBadge status={po.status} />
+                                      <span className="flex items-center gap-1 text-[9px] font-bold text-indigo-600 bg-indigo-50 px-2 py-0.5 rounded border border-indigo-100 uppercase"><MapPin size={10} /> {item.prItem?.purchaseRequest?.outlet?.name || 'Central'}</span>
+                                    </div>
+                                  </td>
+                                  <td className="px-6 py-5 text-center text-sm font-bold text-slate-500">{requestedQty} <span className="text-[9px] text-slate-400">{item.uom}</span></td>
+                                  
+                                  {/* Input Diterima */}
+                                  <td className="px-6 py-5">
+                                    <input 
+                                      type="number" 
+                                      value={receiveData[item.id]?.amount !== undefined ? receiveData[item.id].amount : ''} 
+                                      onChange={(e) => handleInputChange(item.id, 'amount', e.target.value)} 
+                                      className={`w-24 py-2 mx-auto block rounded-xl border-2 text-center font-bold text-sm transition-all outline-none ${
+                                        (receiveData[item.id]?.amount || 0) > 0 
+                                          ? 'border-orange-400 bg-orange-50 text-orange-600' 
+                                          : 'border-slate-200 bg-white'
+                                      }`} 
+                                      placeholder="0" 
+                                    />
+                                  </td>
+
+                                  {/* Input Notes Otomatis Muncul Jika Ada Selisih */}
+                                  <td className="px-6 py-5">
+                                    {receiveData[item.id] !== undefined && receiveData[item.id].amount !== '' ? (
+                                      <div className="flex flex-col gap-2">
+                                        {Number(receiveData[item.id].amount) !== requestedQty && (
+                                          <input 
+                                            type="text" 
+                                            value={receiveData[item.id].notes || ''} 
+                                            onChange={(e) => handleInputChange(item.id, 'notes', e.target.value)} 
+                                            placeholder="Alasan selisih wajib diisi..." 
+                                            className="w-full max-w-[200px] px-3 py-2 rounded-lg bg-rose-50 border border-rose-300 text-xs font-medium text-rose-700 outline-none focus:border-rose-500 placeholder:text-rose-300 shadow-inner" 
+                                          />
+                                        )}
+                                        <div className="flex items-center gap-1 text-[9px] font-bold text-emerald-600 uppercase tracking-widest"><Calendar size={10} /> {new Date().toLocaleDateString('id-ID')}</div>
+                                      </div>
+                                    ) : <span className="text-[10px] text-slate-300 italic uppercase">Waiting...</span>}
+                                  </td>
+                                </tr>
+                              );
+                            })}
+                          </tbody>
+                        </table>
+                      </div>
+                      
+                      {/* ACTION FOOTER */}
+                      <div className="p-5 md:p-6 bg-slate-50 border-t border-slate-100 flex flex-col sm:flex-row items-center justify-end gap-4">
+                        <div className="relative w-full sm:w-64">
+                          <FileSpreadsheet className="absolute left-3 top-1/2 -translate-y-1/2 text-slate-400" size={16} />
+                          <input type="text" placeholder="Nomor Surat Jalan (SJ)..." value={suratJalan[po.id] || ''} onChange={(e) => setSuratJalan({...suratJalan, [po.id]: e.target.value})} className="w-full pl-10 pr-4 py-2.5 rounded-xl border border-slate-200 text-xs font-semibold outline-none focus:border-orange-400 focus:ring-4 focus:ring-orange-500/10 transition-all" />
+                        </div>
+                        <button onClick={() => submitReceiving(po.id)} className="w-full sm:w-auto flex items-center justify-center gap-2 bg-slate-900 hover:bg-orange-500 text-white px-8 py-3 rounded-xl font-bold text-xs uppercase tracking-widest transition-all active:scale-95 group shadow-lg">
+                          <ClipboardCheck size={16} /> Confirm Received <ChevronRight size={16} className="group-hover:translate-x-1 transition-transform" />
+                        </button>
+                      </div>
                     </div>
-                    <div className="p-6 bg-slate-50/50 flex justify-end">
-                      <button 
-                        onClick={() => submitReceiving(po.id)}
-                        className="flex items-center gap-3 bg-slate-900 hover:bg-orange-600 text-white px-8 py-3 rounded-2xl font-black text-[11px] uppercase tracking-widest transition-all active:scale-95 group shadow-lg shadow-slate-200 disabled:bg-slate-300"
-                      >
-                        <ClipboardCheck size={16} />
-                        Confirm Receiving
-                        <ChevronRight size={16} className="group-hover:translate-x-1 transition-transform" />
-                      </button>
-                    </div>
-                  </div>
-                )}
-              </div>
-            );
-          })
-        )}
+                  </BentoCard>
+                );
+              })}
+            </div>
+            /* --- AKHIR DAFTAR PO AKTIF --- */
+
+          )}
+        </AnimatedWrapper>
+        {/* --- AKHIR MAIN CONTENT WRAPPER --- */}
+
       </div>
     </div>
   );

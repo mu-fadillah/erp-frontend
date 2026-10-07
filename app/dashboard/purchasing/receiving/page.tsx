@@ -10,17 +10,17 @@ import {
   Truck, 
   CheckCircle2, 
   Calendar,
-  ClipboardList,
   Loader2,
   MapPin,
-  Building2,
-  Search,
-  History
+  Building2
 } from 'lucide-react';
+import toast from 'react-hot-toast'; // Tambahan utilitas global toast
+import { fetchApi } from '../../../utils/api'; // Menggunakan utilitas global API
 
+// --- INTERFACES ---
 interface MonitoringItem {
   id: string;
-  product: { name: string; code: string };
+  product: { name: string; code: string; sku?: string };
   quantity: number;
   receivedQuantity: number;
   notes?: string;
@@ -40,18 +40,29 @@ interface POMonitor {
   createdAt: string;
   items: MonitoringItem[];
 }
+// --- AKHIR INTERFACES ---
 
 export default function ReceivingMonitorPage() {
+  // --- STATE MANAGEMENT ---
   const [poLogs, setPoLogs] = useState<POMonitor[]>([]);
   const [loading, setLoading] = useState(true);
-  const API_URL = 'http://localhost:3000';
+  // --- AKHIR STATE MANAGEMENT ---
 
+  // --- FETCH DATA (API CALLS) ---
   const fetchMonitorData = useCallback(async () => {
     try {
       setLoading(true);
-      const res = await fetch(`${API_URL}/purchasing/po/list?t=${Date.now()}`);
+      // Menggunakan fetchApi Global yang otomatis menyisipkan Token JWT
+      const res = await fetchApi(`/purchasing/po/list?t=${Date.now()}`);
       if (!res.ok) throw new Error("Gagal mengambil data");
+      
       const data = await res.json();
+      
+      // Safeguard jika response bukan array
+      if (!Array.isArray(data)) {
+        setPoLogs([]);
+        return;
+      }
       
       const monitorable = data.filter((po: any) => po.status === 'SENT' || po.status === 'RECEIVED');
       
@@ -62,29 +73,33 @@ export default function ReceivingMonitorPage() {
       
       setPoLogs(sorted);
     } catch (err) {
-      console.error("Error fetching monitoring data:", err);
+      toast.error("Gagal mengambil data monitoring logistik");
+      setPoLogs([]);
     } finally {
       setLoading(false);
     }
-  }, [API_URL]);
+  }, []);
 
   useEffect(() => {
     fetchMonitorData();
   }, [fetchMonitorData]);
+  // --- AKHIR FETCH DATA ---
 
-  if (loading) {
+  // --- RENDER PREPARATION (LOADING STATE) ---
+  if (loading && poLogs.length === 0) {
     return (
-      <div className="flex flex-col items-center justify-center h-screen bg-white gap-4">
+      <div className="flex flex-col items-center justify-center h-screen bg-transparent gap-4">
         <Loader2 className="animate-spin text-indigo-600" size={32} />
         <p className="text-slate-400 font-bold text-[10px] uppercase tracking-widest">Sinkronisasi Audit Logistik...</p>
       </div>
     );
   }
+  // --- AKHIR RENDER PREPARATION ---
 
   return (
     <div className="max-w-7xl mx-auto space-y-8 pb-20 px-4 sm:px-6 mt-6 font-sans text-slate-900">
       
-      {/* Header Section */}
+      {/* --- HEADER SECTION --- */}
       <div className="flex flex-col md:flex-row md:items-center justify-between gap-4">
         <div>
           <h1 className="text-2xl font-bold tracking-tight">Receiving Monitor</h1>
@@ -101,8 +116,10 @@ export default function ReceivingMonitorPage() {
             </button>
         </div>
       </div>
+      {/* --- AKHIR HEADER SECTION --- */}
 
-      {/* Stats Overview (Opsional tapi Modern) */}
+
+      {/* --- STATS OVERVIEW --- */}
       <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
         <div className="bg-white p-5 rounded-2xl border border-slate-200 shadow-sm">
             <p className="text-[10px] font-black text-slate-400 uppercase tracking-widest mb-1">Total PO Aktif</p>
@@ -117,24 +134,31 @@ export default function ReceivingMonitorPage() {
             <p className="text-2xl font-bold text-emerald-600">{poLogs.filter(po => po.status === 'RECEIVED').length}</p>
         </div>
       </div>
+      {/* --- AKHIR STATS OVERVIEW --- */}
 
-      {/* Main Content */}
+
+      {/* --- MAIN CONTENT (PO LOGS) --- */}
       <div className="space-y-6">
         {poLogs.length === 0 ? (
+          
+          /* EMPTY STATE */
           <div className="bg-white py-20 rounded-3xl text-center border border-slate-200 shadow-sm">
             <Truck size={40} className="mx-auto text-slate-200 mb-4" />
             <h3 className="text-sm font-bold text-slate-400 uppercase tracking-widest">Belum ada aktivitas logistik</h3>
           </div>
+          
         ) : (
+          
+          /* DAFTAR PO LOGS */
           poLogs.map((po) => {
             const totalItems = po.items.length;
             const receivedItemsCount = po.items.filter(it => it.receivedQuantity >= it.quantity && it.quantity > 0).length;
-            const progress = (receivedItemsCount / totalItems) * 100;
+            const progress = totalItems > 0 ? (receivedItemsCount / totalItems) * 100 : 0;
 
             return (
               <div key={po.id} className="bg-white rounded-2xl border border-slate-200 shadow-sm overflow-hidden animate-in fade-in duration-500">
                 
-                {/* Header Card */}
+                {/* Header Card PO */}
                 <div className="p-6 border-b border-slate-100 flex flex-col md:flex-row justify-between items-start md:items-center gap-4 bg-slate-50/30">
                   <div className="flex items-center gap-4">
                     <div className={`p-3 rounded-xl shadow-sm ${
@@ -164,6 +188,7 @@ export default function ReceivingMonitorPage() {
                     </div>
                   </div>
 
+                  {/* Progress Bar Pengiriman */}
                   <div className="w-full md:w-auto flex flex-col items-end gap-1.5">
                     <div className="flex justify-between w-full md:w-40 text-[10px] font-bold text-slate-400 uppercase tracking-widest">
                         <span>Progress</span>
@@ -178,7 +203,7 @@ export default function ReceivingMonitorPage() {
                   </div>
                 </div>
 
-                {/* Items Table */}
+                {/* --- ITEMS TABLE --- */}
                 <div className="overflow-x-auto">
                   <table className="w-full">
                     <thead>
@@ -250,11 +275,15 @@ export default function ReceivingMonitorPage() {
                     </tbody>
                   </table>
                 </div>
+                {/* --- AKHIR ITEMS TABLE --- */}
+
               </div>
             );
           })
         )}
       </div>
+      {/* --- AKHIR MAIN CONTENT --- */}
+      
     </div>
   );
 }

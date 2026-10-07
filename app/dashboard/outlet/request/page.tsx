@@ -1,598 +1,330 @@
 /* eslint-disable react/no-unescaped-entities */
 /* eslint-disable @typescript-eslint/no-explicit-any */
 'use client';
-
-import React, { useState, useEffect, useMemo, useRef } from 'react';
+import React, { useState, useEffect, useRef } from 'react';
 import { 
-  Search, Plus, History, ClipboardList, Download, 
-  Table as TableIcon, FileText, RefreshCw, X, ChevronDown,
-  PackageCheck, Clock, ShoppingCart, CheckCircle2,
-  Calendar, Building2, MapPin, FileCheck, FilterX
+  FileUp, ChevronDown, FileSpreadsheet, ClipboardList, 
+  History as HistoryIcon, RefreshCw 
 } from 'lucide-react';
-// Import library untuk export (Pastikan sudah install: npm install xlsx jspdf jspdf-autotable)
 import * as XLSX from 'xlsx';
-import jsPDF from 'jspdf';
-import 'jspdf-autotable';
+import toast from 'react-hot-toast'; // Tambahan utilitas global toast
+import { fetchApi } from '../../../utils/api'; // Menggunakan utilitas global API
+
+/* --- UI COMPONENTS IMPORT --- */
+import PageHeader from '@/components/ui/PageHeader';
+import RequestForm from './components/RequestForm';
+import RequestHistory from './components/RequestHistory';
+import { ShoppingCart } from 'lucide-react';
+/* --- AKHIR UI COMPONENTS IMPORT --- */
 
 export default function AdminOutletRequestPage() {
+  // --- STATE MANAGEMENT ---
   const [activeTab, setActiveTab] = useState<'form' | 'history'>('form');
   const [products, setProducts] = useState<any[]>([]);
   const [itemGroups, setItemGroups] = useState<any[]>([]);
   const [outlets, setOutlets] = useState<any[]>([]); 
   const [selectedOutletId, setSelectedOutletId] = useState<string>(''); 
-  const [historyItems, setHistoryItems] = useState<any[]>([]);
   const [searchTerm, setSearchTerm] = useState('');
   const [cart, setCart] = useState<any[]>([]);
   const [loading, setLoading] = useState(false);
-  const [showExportMenu, setShowExportMenu] = useState(false);
-  const exportMenuRef = useRef<HTMLDivElement>(null);
+  const [showImportMenu, setShowImportMenu] = useState(false);
+  const [importSuggestions, setImportSuggestions] = useState<any[]>([]); 
+  const [currentUser, setCurrentUser] = useState<any>(null);
 
-  const initialFilters = {
-    startDate: '',
-    endDate: '',
-    searchTerm: '',
-    status: 'ALL',
-    itemGroupId: 'ALL'
-  };
+  const importMenuRef = useRef<HTMLDivElement>(null);
+  const fileInputRef = useRef<HTMLInputElement>(null);
+  // --- AKHIR STATE MANAGEMENT ---
 
-  const [filters, setFilters] = useState(initialFilters);
-  
-  const API_URL = 'http://localhost:3000'; 
-
+  // --- LIFECYCLE & EVENT LISTENERS ---
   useEffect(() => {
+    const userStr = localStorage.getItem('user');
+    if (userStr) {
+      const user = JSON.parse(userStr);
+      setCurrentUser(user);
+      if (user.role === 'ADMINOUTLET') {
+        setSelectedOutletId(user.outletId);
+      }
+    }
+
     fetchData();
+    
     const handleClickOutside = (event: MouseEvent) => {
-      if (exportMenuRef.current && !exportMenuRef.current.contains(event.target as Node)) {
-        setShowExportMenu(false);
+      if (importMenuRef.current && !importMenuRef.current.contains(event.target as Node)) {
+        setShowImportMenu(false);
       }
     };
+    
     document.addEventListener('mousedown', handleClickOutside);
     return () => document.removeEventListener('mousedown', handleClickOutside);
   }, []);
+  // --- AKHIR LIFECYCLE ---
 
+  // --- FETCH DATA (API CALLS) ---
   const fetchData = async () => {
     try {
+      // Menggunakan fetchApi global (otomatis menyisipkan token)
       const [prodRes, groupRes, outletRes] = await Promise.all([
-        fetch(`${API_URL}/product`),
-        fetch(`${API_URL}/item-group`),
-        fetch(`${API_URL}/outlet`) 
+        fetchApi('/product'), 
+        fetchApi('/item-group'), 
+        fetchApi('/outlet') 
       ]);
       setProducts(await prodRes.json());
       setItemGroups(await groupRes.json());
       setOutlets(await outletRes.json());
-    } catch (err) {
-      console.error("Fetch error:", err);
+    } catch (err) { 
+      toast.error("Gagal mengambil data produk dan outlet."); 
     }
   };
+  // --- AKHIR FETCH DATA ---
 
-  useEffect(() => {
-    if (activeTab === 'history') fetchHistory();
-  }, [activeTab]);
-
-  const fetchHistory = async () => {
-    setLoading(true);
-    try {
-      const res = await fetch(`${API_URL}/purchasing/pr/history?t=${Date.now()}`, {
-        cache: 'no-store'
-      });
-      const data = await res.json();
-      setHistoryItems(Array.isArray(data) ? data : []);
-    } catch (err) {
-      console.error("Error fetching PR history:", err);
-      setHistoryItems([]); 
-    } finally {
-      setLoading(false);
-    }
+  // --- EXCEL IMPORT LOGIC & SMART MATCHING ---
+  const PRODUCT_ALIASES: Record<string, string> = {
+    'COKE': 'COLA', 'COCA COLA': 'COLA', 'JACK D': 'JACK DANIELS', 'JAGER': 'JAGERMEISTER'
   };
 
-  const clearFilters = () => {
-    setFilters(initialFilters);
-  };
+  const sanitize = (str: string) => str.toUpperCase().replace(/\s+/g, ' ').trim();
 
-  // --- LOGIKA EXPORT EXCEL ---
-  const exportToExcel = () => {
-    const dataToExport = filteredHistory.map(item => ({
-      'Tanggal Request': new Date(item.createdAt).toLocaleDateString('id-ID'),
-      'Outlet': item.purchaseRequest?.outlet?.name || 'Central',
-      'SKU': item.product?.sku || item.product?.code || '-', // Kolom Baru
-      'Nama Barang': item.product?.name || item.tempProductName,
-      'Qty Request': item.quantity,
-      'Qty Received': item.receivedQuantity || 0,
-      'Status': item.status,
-      'Tanggal Diterima': item.receivedDate ? new Date(item.receivedDate).toLocaleDateString('id-ID') : '-',
-      'Catatan': item.notes || '-'
-    }));
-
-    const ws = XLSX.utils.json_to_sheet(dataToExport);
-    const wb = XLSX.utils.book_new();
-    XLSX.utils.book_append_sheet(wb, ws, "History PR");
-    XLSX.writeFile(wb, `PR_History_${new Date().getTime()}.xlsx`);
-    setShowExportMenu(false);
-  };
-
-  // --- LOGIKA EXPORT PDF ---
-  const exportToPDF = () => {
-    const doc = new jsPDF();
-    // Menambahkan "SKU" ke dalam header kolom
-    const tableColumn = ["Tanggal", "Outlet", "SKU", "Item", "Qty Req", "Qty Rec", "Status"];
+  const getSimilarityScore = (importName: string, dbName: string) => {
+    const s1 = sanitize(importName);
+    const s2 = sanitize(dbName);
+    const aliasName = PRODUCT_ALIASES[s1];
+    if (aliasName === s2 || s1 === s2) return 1.0; 
     
-    const tableRows = filteredHistory.map(item => [
-      new Date(item.createdAt).toLocaleDateString('id-ID'),
-      item.purchaseRequest?.outlet?.name || 'Central',
-      item.product?.sku || item.product?.code || '-', // Data SKU Baru
-      item.product?.name || item.tempProductName,
-      item.quantity,
-      item.receivedQuantity || 0,
-      item.status
-    ]);
-
-    (doc as any).autoTable({
-      head: [tableColumn],
-      body: tableRows,
-      startY: 20,
-      styles: { fontSize: 8 }, // Sedikit diperkecil karena kolom bertambah
-      headStyles: { fillColor: [15, 23, 42] } // Warna Slate-900 agar matching dengan UI
-    });
-
-    doc.setFontSize(14);
-    doc.text("Riwayat Purchase Request", 14, 15);
-    doc.save(`PR_History_${new Date().getTime()}.pdf`);
-    setShowExportMenu(false);
+    const getGrams = (s: string) => {
+      const grams = [];
+      for (let i = 0; i < s.length - 1; i++) grams.push(s.substring(i, i + 2));
+      return grams;
+    };
+    
+    const g1 = getGrams(s1);
+    const g2 = getGrams(s2);
+    const intersection = g1.filter(x => g2.includes(x)).length;
+    const total = g1.length + g2.length;
+    return total === 0 ? 0 : (2.0 * intersection) / total;
   };
 
-  const filteredHistory = useMemo(() => {
-    const filtered = historyItems.filter((item: any) => {
-      const prod = item.product || {};
-      const itemName = (prod.name || item.tempProductName || '').toLowerCase();
-      const itemDate = new Date(item.createdAt).toISOString().split('T')[0];
-      
-      const matchSearch = itemName.includes(filters.searchTerm.toLowerCase());
-      const matchStatus = filters.status === 'ALL' || item.status === filters.status;
-      const matchGroup = filters.itemGroupId === 'ALL' || prod.itemGroupId === filters.itemGroupId;
-      const matchStart = !filters.startDate || itemDate >= filters.startDate;
-      const matchEnd = !filters.endDate || itemDate <= filters.endDate;
+  const handleDownloadTemplate = () => {
+    const templateData = [{ 'Nama Barang': 'JAGERMEISTER 700ML', 'Quantity': 5, 'Satuan': 'BTL', 'Catatan': 'Segera dikirim' }];
+    const ws = XLSX.utils.json_to_sheet(templateData);
+    const wb = XLSX.utils.book_new();
+    XLSX.utils.book_append_sheet(wb, ws, "Template_Request");
+    XLSX.writeFile(wb, "Template_Purchase_Request.xlsx");
+    setShowImportMenu(false);
+  };
 
-      return matchSearch && matchStatus && matchGroup && matchStart && matchEnd;
-    });
+  const handleImportExcel = (e: React.ChangeEvent<HTMLInputElement>) => {
+    const file = e.target.files?.[0];
+    if (!file) return;
+    
+    const reader = new FileReader();
+    reader.onload = (evt) => {
+      try {
+        const bstr = evt.target?.result;
+        const wb = XLSX.read(bstr, { type: 'binary' });
+        const ws = wb.Sheets[wb.SheetNames[0]];
+        const data: any[] = XLSX.utils.sheet_to_json(ws);
 
-    return filtered.sort((a, b) => {
-      const outletA = (a.purchaseRequest?.outlet?.name || 'Z-Tanpa Nama').toLowerCase();
-      const outletB = (b.purchaseRequest?.outlet?.name || 'Z-Tanpa Nama').toLowerCase();
+        if (data.length === 0) return toast.error("File Excel kosong!");
 
-      if (outletA !== outletB) return outletA.localeCompare(outletB);
-      return new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime();
-    });
-  }, [historyItems, filters]);
+        const newSuggestions: any[] = [];
+        const confirmedItems: any[] = [];
 
-  // (Fungsi addToCart & handleSendRequest tetap sama seperti snippet Anda...)
+        data.forEach((row: any) => {
+          const rowName = row['Nama Barang'] || '';
+          let bestMatch: any = null;
+          let highestScore = 0;
+          
+          products.forEach(p => {
+            const score = getSimilarityScore(rowName, p.name);
+            if (score > highestScore) { highestScore = score; bestMatch = p; }
+          });
+          
+          const itemBase = { name: rowName, quantity: Number(row['Quantity']) || 1, uom: row['Satuan'] || 'PCS', notes: row['Catatan'] || '' };
+          
+          if (highestScore > 0.85) {
+            confirmedItems.push({ ...itemBase, productId: bestMatch.id, itemGroupId: bestMatch.itemGroupId, itemGroupName: bestMatch.itemGroup?.name, uom: bestMatch.uom, isNew: false });
+          } else if (highestScore > 0.25) {
+            newSuggestions.push({ ...itemBase, suggestion: bestMatch, score: Math.round(highestScore * 100) });
+          } else {
+            confirmedItems.push({ ...itemBase, productId: null, itemGroupId: '', isNew: true });
+          }
+        });
+        
+        setCart(prev => [...prev, ...confirmedItems]);
+        setShowImportMenu(false);
+        
+        if (newSuggestions.length > 0) {
+            setImportSuggestions(newSuggestions);
+        } else {
+            toast.success(`Berhasil mengimpor ${confirmedItems.length} item`);
+        }
+        
+      } catch (err) { 
+        toast.error("Gagal memproses file Excel"); 
+      } finally { 
+        if (fileInputRef.current) fileInputRef.current.value = ''; 
+      }
+    };
+    reader.readAsBinaryString(file);
+  };
+  // --- AKHIR EXCEL IMPORT LOGIC ---
+
+  // --- SUBMIT REQUEST LOGIC ---
   const addToCart = (product?: any) => {
     const newItem = product ? {
-      productId: product.id, 
-      name: product.name, 
-      itemGroupId: product.itemGroupId,
-      itemGroupName: product.itemGroup?.name || 'Umum',
-      uom: product.uom || 'PCS', 
-      quantity: 1, 
-      notes: ''
+      productId: product.id, name: product.name, itemGroupId: product.itemGroupId, itemGroupName: product.itemGroup?.name || 'Umum',
+      uom: product.uom || 'PCS', quantity: 1, notes: '', isNew: false 
     } : {
-      name: searchTerm, 
-      itemGroupId: '',
-      itemGroupName: '',
-      uom: 'PCS', 
-      quantity: 1, 
-      notes: ''
+      productId: null, name: searchTerm, itemGroupId: '', itemGroupName: '', uom: 'PCS', quantity: 1, notes: '', isNew: true 
     };
     setCart([...cart, newItem]);
     setSearchTerm('');
   };
 
   const handleSendRequest = async () => {
-    if (cart.length === 0) return;
-    if (!selectedOutletId) {
-        alert("Pilih outlet terlebih dahulu!");
-        return;
+    if (cart.length === 0 || !selectedOutletId) {
+        return toast.error("Pilih outlet dan minimal 1 item untuk dipesan!");
     }
+
+    const cleanedItems = cart.map(item => ({
+      productId: item.productId || undefined, name: item.name, quantity: Number(item.quantity), uom: item.uom,
+      itemGroupName: item.itemGroupName || 'Umum', itemGroupId: item.itemGroupId || undefined, notes: item.notes || ''
+    }));
 
     setLoading(true);
     try {
-      const response = await fetch(`${API_URL}/purchasing/pr/create`, {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ 
-            outletId: selectedOutletId, 
-            items: cart 
-        }),
+      // Menggunakan fetchApi global
+      const response = await fetchApi('/purchasing/pr/create', {
+        method: 'POST', 
+        body: JSON.stringify({ outletId: selectedOutletId, items: cleanedItems }),
       });
-      if (response.ok) {
-        setCart([]);
-        setSelectedOutletId('');
-        alert(`Sukses mengirim request.`);
-        setActiveTab('history');
+      
+      if (response.ok) { 
+        setCart([]); 
+        if (currentUser?.role !== 'ADMINOUTLET') setSelectedOutletId(''); 
+        toast.success("Request berhasil dikirim!"); 
+        setActiveTab('history'); 
+      } else {
+        const errorData = await response.json();
+        toast.error("Gagal: " + (Array.isArray(errorData.message) ? errorData.message.join(', ') : errorData.message));
       }
     } catch (error) { 
-      alert('Gagal mengirim request.');
+      toast.error("Koneksi gagal saat mengirim request"); 
     } finally { 
       setLoading(false); 
     }
   };
-
-  const getStatusIcon = (status: string) => {
-    switch(status) {
-      case 'DRAFT': return <FileText size={12} />;
-      case 'OFFICIAL': return <FileCheck size={12} />;
-      case 'PENDING': return <Clock size={12} />;
-      case 'PROCESSED': return <ShoppingCart size={12} />;
-      case 'SENT': return <PackageCheck size={12} />;
-      case 'RECEIVED': return <CheckCircle2 size={12} />;
-      default: return null;
-    }
-  };
-
-  const getStatusStyle = (status: string) => {
-    switch(status) {
-      case 'DRAFT': return 'bg-slate-100 text-slate-500 border-slate-200';
-      case 'OFFICIAL': return 'bg-violet-50 text-violet-600 border-violet-100';
-      case 'PENDING': return 'bg-amber-50 text-amber-600 border-amber-100';
-      case 'PROCESSED': return 'bg-blue-50 text-blue-600 border-blue-100';
-      case 'SENT': return 'bg-indigo-50 text-indigo-600 border-indigo-100';
-      case 'RECEIVED': return 'bg-emerald-50 text-emerald-700 border-emerald-100';
-      default: return 'bg-slate-50 text-slate-500 border-slate-100';
-    }
-  };
+  // --- AKHIR SUBMIT REQUEST LOGIC ---
 
   return (
-    <div className="max-w-7xl mx-auto space-y-6 pb-20 px-4 sm:px-6 mt-6 font-sans text-slate-900">
-      
-      {/* Top Navigation */}
-      <div className="flex flex-col md:flex-row md:items-center justify-between gap-4">
-        <div>
-          <h1 className="text-2xl font-bold tracking-tight">Purchase Request</h1>
-          <p className="text-sm text-slate-500">Kelola permintaan stok barang ke pusat</p>
-        </div>
+    <div className="min-h-screen bg-[#F8FAFC] font-sans text-slate-600 relative selection:bg-indigo-100">
+      <div className="w-full p-4 md:p-5 pb-24 space-y-5">
         
-        <div className="flex bg-slate-200/50 p-1 rounded-xl w-fit border border-slate-200">
-          <button onClick={() => setActiveTab('form')} className={`flex items-center gap-2 px-6 py-2 rounded-lg text-xs font-semibold transition-all ${activeTab === 'form' ? 'bg-white text-indigo-600 shadow-sm' : 'text-slate-500 hover:text-slate-700'}`}>
-            <ClipboardList size={14} /> Request Form
-          </button>
-          <button onClick={() => setActiveTab('history')} className={`flex items-center gap-2 px-6 py-2 rounded-lg text-xs font-semibold transition-all ${activeTab === 'history' ? 'bg-white text-indigo-600 shadow-sm' : 'text-slate-500 hover:text-slate-700'}`}>
-            <History size={14} /> History
-          </button>
-        </div>
-      </div>
-
-      {activeTab === 'form' ? (
-        <div className="grid grid-cols-1 lg:grid-cols-3 gap-6 animate-in fade-in duration-300">
-             {/* Left Column: Search & Add */}
-             <div className="lg:col-span-1 space-y-6">
-            <div className="bg-white p-6 rounded-2xl border border-slate-200 shadow-sm">
-              <label className="text-xs font-bold text-slate-400 uppercase tracking-widest block mb-4">Cari Produk</label>
-              <div className="relative">
-                <Search className="absolute left-4 top-1/2 -translate-y-1/2 text-slate-400" size={18} />
-                <input 
-                  type="text" 
-                  placeholder="Ketik nama barang..." 
-                  className="w-full pl-12 pr-4 py-3 bg-slate-50 border border-slate-200 rounded-xl outline-none focus:ring-2 focus:ring-indigo-500/10 focus:bg-white focus:border-indigo-500 transition-all text-sm font-medium" 
-                  value={searchTerm} 
-                  onChange={(e) => setSearchTerm(e.target.value)} 
-                />
-                
-                {searchTerm.length > 0 && (
-                  <div className="absolute z-50 w-full bg-white border border-slate-200 shadow-xl mt-2 rounded-xl overflow-hidden">
-                    {products.filter(p => p.name.toLowerCase().includes(searchTerm.toLowerCase())).slice(0, 5).map((p: any) => (
-                      <div key={p.id} onClick={() => addToCart(p)} className="p-3 hover:bg-slate-50 cursor-pointer border-b border-slate-100 flex justify-between items-center group">
-                        <div>
-                          <p className="font-semibold text-slate-800 text-sm">{p.name}</p>
-                          <p className="text-[10px] text-indigo-500 font-medium uppercase tracking-wider">{p.itemGroup?.name || 'UMUM'}</p>
-                        </div>
-                        <Plus size={16} className="text-slate-300 group-hover:text-indigo-600" />
-                      </div>
-                    ))}
-                    <div onClick={() => addToCart()} className="p-3 bg-indigo-50 text-indigo-600 cursor-pointer hover:bg-indigo-100 flex justify-between items-center">
-                      <p className="text-xs font-medium italic">Barang tidak terdaftar? Tambah manual</p>
-                      <Plus size={16} />
-                    </div>
-                  </div>
-                )}
-              </div>
-            </div>
+        {/* --- SECTION: HEADER & NAVIGATION --- */}
+        <PageHeader 
+          title="Purchase" highlight="Request" 
+          description="Manage and synchronize your outlet inventory requirements with central warehouse."
+          moduleName="Outlet Operations" icon={<ShoppingCart size={14} className="text-indigo-600" />}
+        >
+          <div className="flex flex-col sm:flex-row items-end sm:items-center gap-4">
             
-            <div className="bg-indigo-600 p-6 rounded-2xl text-white shadow-lg shadow-indigo-200">
-                <h4 className="text-sm font-bold mb-2">Punya Request Khusus?</h4>
-                <p className="text-xs text-indigo-100 leading-relaxed opacity-90">Anda dapat menambah item secara manual jika produk tidak ditemukan di database kami.</p>
-            </div>
-          </div>
-
-          {/* Right Column: Cart Table */}
-          <div className="lg:col-span-2">
-            <div className="bg-white rounded-2xl border border-slate-200 shadow-sm overflow-hidden flex flex-col h-full">
-              <div className="px-6 py-4 border-b flex justify-between items-center bg-slate-50/50">
-                <h3 className="text-xs font-bold text-slate-500 uppercase tracking-widest">Draft Permintaan ({cart.length})</h3>
-                
-                <div className="flex items-center gap-4">
-                    {cart.length > 0 && (
-                        <div className="flex items-center gap-2">
-                            <Building2 size={14} className="text-slate-400" />
-                            <select 
-                                required
-                                value={selectedOutletId}
-                                onChange={(e) => setSelectedOutletId(e.target.value)}
-                                className="text-[10px] font-bold text-indigo-600 bg-white border border-slate-200 px-3 py-1.5 rounded-lg outline-none focus:ring-2 focus:ring-indigo-500/20 transition-all cursor-pointer"
-                            >
-                                <option value="">PILIH OUTLET ASAL...</option>
-                                {outlets.map(o => (
-                                    <option key={o.id} value={o.id}>{o.name.toUpperCase()}</option>
-                                ))}
-                            </select>
-                        </div>
-                    )}
-
-                    {cart.length > 0 && (
-                      <button onClick={() => { setCart([]); setSelectedOutletId(''); }} className="text-[10px] text-slate-400 hover:text-rose-500 font-bold uppercase transition-all">Clear All</button>
-                    )}
-                </div>
-              </div>
+            {/* Import Menu Dropdown */}
+            <div className="relative" ref={importMenuRef}>
+              <button onClick={() => setShowImportMenu(!showImportMenu)} className="flex items-center gap-2 bg-white border border-slate-200 text-slate-700 px-5 py-2.5 rounded-lg text-xs font-semibold hover:bg-slate-50 transition-all active:scale-95 shadow-sm group">
+                <FileUp size={14} className="text-indigo-600 group-hover:scale-110 transition-transform" /> Actions & Imports
+                <ChevronDown size={14} className={`transition-transform duration-300 ${showImportMenu ? 'rotate-180' : ''}`} />
+              </button>
               
-              <div className="flex-grow overflow-auto min-h-[400px]">
-                {cart.length > 0 ? (
-                  <table className="w-full">
-                    <thead className="sticky top-0 bg-white shadow-sm z-10">
-                      <tr className="text-slate-400 text-left text-[10px] font-bold uppercase tracking-widest border-b">
-                        <th className="px-6 py-4">Produk</th>
-                        <th className="px-4 py-4 text-center">Qty</th>
-                        <th className="px-6 py-4">Catatan</th>
-                        <th className="px-6 py-4 text-right"></th>
-                      </tr>
-                    </thead>
-                    <tbody className="divide-y divide-slate-100 text-sm">
-                      {cart.map((item, idx) => (
-                        <tr key={idx} className="hover:bg-slate-50/50 transition-colors">
-                          <td className="px-6 py-4">
-                            <p className="font-semibold text-slate-800">{item.name}</p>
-                            <div className="flex flex-wrap items-center gap-2 mt-1">
-                              <select 
-                                className="text-[10px] font-bold text-indigo-600 bg-indigo-50 px-2 py-0.5 rounded border-none outline-none appearance-none cursor-pointer hover:bg-indigo-100 transition-colors"
-                                value={item.itemGroupId}
-                                onChange={(e) => {
-                                  const n = [...cart];
-                                  n[idx].itemGroupId = e.target.value;
-                                  n[idx].itemGroupName = itemGroups.find(g => g.id === e.target.value)?.name || '';
-                                  setCart(n);
-                                }}
-                              >
-                                <option value="">Kategori...</option>
-                                {itemGroups.map(g => <option key={g.id} value={g.id}>{g.name}</option>)}
-                              </select>
+              <input type="file" ref={fileInputRef} onChange={handleImportExcel} accept=".xlsx,.xls" className="hidden" />
 
-                              <div className="flex items-center gap-1">
-                                <span className="text-[10px] text-slate-400 font-medium">UOM:</span>
-                                <select 
-                                  className="text-[10px] font-bold text-slate-600 bg-slate-100 px-2 py-0.5 rounded border-none outline-none appearance-none cursor-pointer hover:bg-slate-200 transition-colors"
-                                  value={item.uom}
-                                  onChange={(e) => {
-                                    const n = [...cart];
-                                    n[idx].uom = e.target.value;
-                                    setCart(n);
-                                  }}
-                                >
-                                  {['PCS', 'PACK', 'BTL', 'KG', 'GR', 'LTR', 'ML'].map(u => (
-                                    <option key={u} value={u}>{u}</option>
-                                  ))}
-                                </select>
-                              </div>
-                            </div>
-                          </td>
-                          <td className="px-4 py-4">
-                            <div className="flex justify-center">
-                                <input 
-                                    type="number" 
-                                    className="w-16 p-2 bg-slate-100 border-none rounded-lg text-center font-bold text-indigo-600 text-sm outline-none focus:ring-2 focus:ring-indigo-500/20 transition-all" 
-                                    value={item.quantity} 
-                                    onChange={(e) => { const n=[...cart]; n[idx].quantity=Number(e.target.value); setCart(n); }} 
-                                />
-                            </div>
-                          </td>
-                          <td className="px-6 py-4">
-                            <input 
-                                placeholder="Opsional..." 
-                                className="w-full p-2 bg-slate-50 border border-slate-200 rounded-lg text-xs outline-none focus:bg-white transition-all" 
-                                value={item.notes} 
-                                onChange={(e) => { const n=[...cart]; n[idx].notes=e.target.value; setCart(n); }} 
-                            />
-                          </td>
-                          <td className="px-6 py-4 text-right">
-                            <button onClick={() => setCart(cart.filter((_, i) => i !== idx))} className="p-2 text-slate-300 hover:text-rose-500 rounded-lg transition-all">
-                                <X size={16}/>
-                            </button>
-                          </td>
-                        </tr>
-                      ))}
-                    </tbody>
-                  </table>
-                ) : (
-                  <div className="h-full flex flex-col items-center justify-center py-20">
-                    <div className="w-16 h-16 bg-slate-50 rounded-full flex items-center justify-center text-slate-200 mb-4">
-                        <ClipboardList size={32}/>
-                    </div>
-                    <p className="text-slate-400 font-medium text-sm tracking-wide">Daftar permintaan masih kosong</p>
-                  </div>
-                )}
-              </div>
-              
-              {cart.length > 0 && (
-                <div className="p-6 bg-slate-50 border-t border-slate-200">
-                  <button 
-                    onClick={handleSendRequest} 
-                    disabled={loading} 
-                    className={`w-full py-4 rounded-xl font-bold text-sm uppercase tracking-wider shadow-md transition-all active:scale-[0.98] disabled:opacity-50 ${
-                        !selectedOutletId ? 'bg-slate-300 text-slate-500 cursor-not-allowed' : 'bg-indigo-600 hover:bg-indigo-700 text-white shadow-indigo-200'
-                    }`}
-                  >
-                    {loading ? 'Mengirim...' : !selectedOutletId ? 'Pilih Outlet Terlebih Dahulu' : 'Kirim Request ke Purchasing'}
+              {showImportMenu && (
+                <div className="absolute right-0 sm:left-0 mt-2 w-64 bg-white border border-slate-100 rounded-xl shadow-xl z-[100] overflow-hidden animate-in zoom-in-95 origin-top-left">
+                  <button onClick={handleDownloadTemplate} className="w-full flex items-center gap-3 px-5 py-4 text-xs font-semibold text-slate-600 hover:bg-indigo-50/50 transition-colors border-b border-slate-50 text-left">
+                    <FileSpreadsheet size={16} className="text-indigo-500" /> Download Template
+                  </button>
+                  <button onClick={() => { fileInputRef.current?.click(); setShowImportMenu(false); }} className="w-full flex items-center gap-3 px-5 py-4 text-xs font-semibold text-slate-600 hover:bg-emerald-50/50 transition-colors text-left">
+                    <FileUp size={16} className="text-emerald-500" /> Upload Excel File
                   </button>
                 </div>
               )}
             </div>
-          </div>
-        </div>
-      ) : (
-        /* History Section */
-        <div className="space-y-6 animate-in fade-in duration-300">
-          <div className="bg-white p-6 rounded-2xl border border-slate-200 shadow-sm flex flex-wrap gap-4 items-end">
-            <div className="flex-grow min-w-[200px]">
-              <label className="text-[10px] font-bold text-slate-400 uppercase tracking-widest block mb-2">Pencarian</label>
-              <div className="relative">
-                <Search className="absolute left-3 top-1/2 -translate-y-1/2 text-slate-300" size={14} />
-                <input 
-                    className="w-full pl-9 pr-4 py-2 bg-slate-50 border border-slate-200 rounded-lg text-sm font-medium outline-none focus:border-indigo-500 transition-all" 
-                    placeholder="Nama item..." 
-                    value={filters.searchTerm} 
-                    onChange={e => setFilters({...filters, searchTerm: e.target.value})}
-                />
-              </div>
-            </div>
-            <div className="w-40">
-              <label className="text-[10px] font-bold text-slate-400 uppercase tracking-widest block mb-2">Status</label>
-              <select 
-                className="w-full p-2 bg-slate-50 border border-slate-200 rounded-lg text-sm font-semibold outline-none cursor-pointer" 
-                value={filters.status} 
-                onChange={e => setFilters({...filters, status: e.target.value})}
-              >
-                <option value="ALL">SEMUA</option>
-                <option value="PENDING">PENDING</option>
-                <option value="PROCESSED">PROCESSED</option>
-                <option value="RECEIVED">RECEIVED</option>
-              </select>
-            </div>
-            <div className="w-40">
-              <label className="text-[10px] font-bold text-slate-400 uppercase tracking-widest block mb-2 flex items-center gap-1"><Calendar size={10}/> Dari</label>
-              <input type="date" className="w-full p-2 bg-slate-50 border border-slate-200 rounded-lg text-xs outline-none font-semibold" value={filters.startDate} onChange={e => setFilters({...filters, startDate: e.target.value})}/>
-            </div>
-            <div className="w-40">
-              <label className="text-[10px] font-bold text-slate-400 uppercase tracking-widest block mb-2 flex items-center gap-1"><Calendar size={10}/> Sampai</label>
-              <input type="date" className="w-full p-2 bg-slate-50 border border-slate-200 rounded-lg text-xs outline-none font-semibold" value={filters.endDate} onChange={e => setFilters({...filters, endDate: e.target.value})}/>
-            </div>
-            
-            {/* Tombol Clear Filter */}
-            <button 
-              onClick={clearFilters}
-              className="flex items-center gap-2 px-4 py-2 bg-rose-50 text-rose-600 rounded-lg text-xs font-bold hover:bg-rose-100 transition-colors border border-rose-100"
-            >
-              <FilterX size={14} /> Clear
-            </button>
-          </div>
 
-          <div className="bg-white rounded-2xl border border-slate-200 shadow-sm overflow-hidden">
-            <div className="px-6 py-4 border-b flex justify-between items-center bg-white">
-              <div className="flex items-center gap-3">
-                <div className="p-2 bg-slate-100 rounded-lg text-slate-600"><History size={16}/></div>
-                <h3 className="text-sm font-bold text-slate-700 tracking-tight">Riwayat Permintaan</h3>
-              </div>
-              <div className="flex gap-2 relative" ref={exportMenuRef}>
-                <button onClick={fetchHistory} className="p-2 hover:bg-slate-50 rounded-lg transition-colors border border-slate-200 text-slate-500">
-                    <RefreshCw size={16} className={loading ? 'animate-spin' : ''}/>
-                </button>
-                <button 
-                  onClick={() => setShowExportMenu(!showExportMenu)}
-                  className="flex items-center gap-2 bg-slate-900 text-white px-4 py-2 rounded-lg text-[11px] font-bold uppercase tracking-wider transition-all hover:bg-slate-800"
-                >
-                  <Download size={14}/> Export <ChevronDown size={14}/>
-                </button>
-                {showExportMenu && (
-                  <div className="absolute top-full right-0 mt-2 w-48 bg-white border border-slate-200 rounded-xl shadow-xl z-50 overflow-hidden animate-in zoom-in-95 duration-100">
-                    <button onClick={exportToExcel} className="w-full px-4 py-3 text-left text-xs font-semibold hover:bg-slate-50 flex items-center gap-3 transition-colors border-b border-slate-50 text-slate-700">
-                      <TableIcon size={16} className="text-emerald-600" /> Excel Spreadsheet
-                    </button>
-                    <button onClick={exportToPDF} className="w-full px-4 py-3 text-left text-xs font-semibold hover:bg-slate-50 flex items-center gap-3 transition-colors text-slate-700">
-                      <FileText size={16} className="text-rose-600" /> PDF Document
-                    </button>
-                  </div>
-                )}
-              </div>
+            {/* Tab Navigation */}
+            <div className="flex bg-slate-200/50 p-1.5 rounded-xl h-fit shadow-inner">
+              <button onClick={() => setActiveTab('form')} className={`flex items-center gap-2 px-6 py-2 rounded-lg text-xs font-semibold transition-all duration-300 ${activeTab === 'form' ? 'bg-white text-indigo-600 shadow-sm translate-y-[-1px]' : 'text-slate-500 hover:text-slate-800'}`}><ClipboardList size={14} /> Request Form</button>
+              <button onClick={() => setActiveTab('history')} className={`flex items-center gap-2 px-6 py-2 rounded-lg text-xs font-semibold transition-all duration-300 ${activeTab === 'history' ? 'bg-white text-indigo-600 shadow-sm translate-y-[-1px]' : 'text-slate-500 hover:text-slate-800'}`}><HistoryIcon size={14} /> History</button>
             </div>
-            
-            <div className="overflow-x-auto">
-              <table className="w-full text-sm">
-                <thead>
-                  <tr className="bg-slate-50/50 text-slate-400 text-left text-[10px] font-bold uppercase tracking-widest border-b">
-                    <th className="px-6 py-4">Waktu Request</th>
-                    <th className="px-6 py-4">Item & Outlet</th>
-                    <th className="px-4 py-4 text-center">Qty Request</th>
-                    <th className="px-4 py-4 text-center">Qty Received</th>
-                    <th className="px-6 py-4 text-center">Received At</th>
-                    <th className="px-6 py-4 text-center">Status</th>
-                    <th className="px-6 py-4">Catatan</th>
-                  </tr>
-                </thead>
-                <tbody className="divide-y divide-slate-100">
-                  {loading ? (
-                    <tr><td colSpan={7} className="py-20 text-center"><RefreshCw className="animate-spin mx-auto text-indigo-400 mb-2"/> <p className="text-xs font-medium text-slate-400">Memuat data...</p></td></tr>
-                  ) : filteredHistory.length === 0 ? (
-                    <tr><td colSpan={7} className="py-20 text-center text-slate-400 text-xs font-medium">Data tidak ditemukan</td></tr>
-                  ) : filteredHistory.map((item: any) => (
-                    <tr key={item.id} className="hover:bg-slate-50/30 transition-colors">
-                      <td className="px-6 py-4">
-                        <div className="flex flex-col">
-                          <span className="text-slate-700 font-semibold text-xs">
-                            {new Date(item.createdAt).toLocaleDateString('id-ID', { day: '2-digit', month: 'short', year: 'numeric' })}
-                          </span>
-                          <span className="text-[10px] text-slate-400 font-bold flex items-center gap-1">
-                            <Clock size={10} /> {new Date(item.createdAt).toLocaleTimeString('id-ID', { hour: '2-digit', minute: '2-digit' })}
-                          </span>
-                        </div>
-                      </td>
-                       <td className="px-6 py-4">
-                        <p className="font-semibold text-slate-800">{item.product?.name || item.tempProductName}</p>
-                        <div className="flex items-center gap-2 mt-1">
-                          <span className="flex items-center gap-1 text-[9px] font-black text-indigo-500 bg-indigo-50 px-2 py-0.5 rounded border border-indigo-100 uppercase">
-                            <MapPin size={10} /> {item.purchaseRequest?.outlet?.name || 'Central'}
-                          </span>
-                          <span className="text-[10px] text-slate-400 uppercase font-bold tracking-wider">{item.product?.itemGroup?.name || 'UMUM'}</span>
-                        </div>
-                      </td>
-                      <td className="px-4 py-4 text-center">
-                        <div className="inline-flex flex-col items-center">
-                          <span className="font-bold text-slate-700 text-sm">{item.quantity}</span>
-                          <span className="text-[10px] text-slate-400 font-bold uppercase">{item.uom}</span>
-                        </div>
-                      </td>
-                      <td className="px-4 py-4 text-center">
-                        <div className="inline-flex flex-col items-center">
-                          <span className={`font-black text-sm ${item.receivedQuantity > 0 ? 'text-emerald-600' : 'text-slate-300'}`}>
-                            {item.receivedQuantity || 0}
-                          </span>
-                          <span className={`text-[9px] font-bold uppercase ${item.receivedQuantity > 0 ? 'text-emerald-400' : 'text-slate-300'}`}>CONFIRMED</span>
-                        </div>
-                      </td>
-                      {/* Kolom Tanggal Kedatangan Baru */}
-                      <td className="px-6 py-4 text-center">
-                        {item.status === 'RECEIVED' && item.receivedDate ? (
-                          <div className="flex flex-col">
-                            <span className="text-emerald-700 font-bold text-[11px]">
-                                {new Date(item.receivedDate).toLocaleDateString('id-ID', { day: '2-digit', month: 'short' })}
-                            </span>
-                            <span className="text-[9px] text-emerald-500 font-medium italic">Sampai</span>
-                          </div>
-                        ) : (
-                          <span className="text-slate-300 text-[10px]">-</span>
-                        )}
-                      </td>
-                      <td className="px-6 py-4 text-center">
-                        <span className={`inline-flex items-center gap-1.5 px-3 py-1 rounded-full text-[10px] font-black uppercase border tracking-tight ${getStatusStyle(item.status)}`}>
-                          {getStatusIcon(item.status)}
-                          {item.status}
-                        </span>
-                      </td>
-                      <td className="px-6 py-4">
-                        <p className="text-xs text-slate-400 italic truncate max-w-[120px]">{item.notes || '-'}</p>
-                      </td>
-                    </tr>
-                  ))}
-                </tbody>
-              </table>
+          </div>
+        </PageHeader>
+        {/* --- AKHIR SECTION: HEADER --- */}
+
+        {/* --- SECTION: MAIN CONTENT RENDERER --- */}
+        {activeTab === 'form' ? (
+          <RequestForm 
+            searchTerm={searchTerm} setSearchTerm={setSearchTerm} products={products} addToCart={addToCart} 
+            selectedOutletId={selectedOutletId} setSelectedOutletId={setSelectedOutletId} currentUser={currentUser} 
+            outlets={outlets} cart={cart} setCart={setCart} itemGroups={itemGroups} handleSendRequest={handleSendRequest} loading={loading} 
+          />
+        ) : (
+          <RequestHistory />
+        )}
+        {/* --- AKHIR SECTION: MAIN CONTENT --- */}
+
+      </div>
+
+      {/* --- SECTION: SYNC CONFLICTS MODAL --- */}
+      {importSuggestions.length > 0 && (
+        <div className="fixed inset-0 bg-slate-900/40 backdrop-blur-sm flex items-center justify-center z-[1000] p-4 animate-in fade-in duration-300">
+          <div className="bg-white rounded-2xl w-full max-w-lg shadow-2xl overflow-hidden animate-in zoom-in-95 duration-500">
+            <div className="p-8 border-b border-slate-50 bg-indigo-50/30 text-center">
+              <div className="flex items-center justify-center gap-3 text-indigo-600 mb-2">
+                  <RefreshCw size={24} className="animate-spin-slow" />
+                  <h2 className="text-xl font-light tracking-tight text-slate-900">Sync <span className="font-semibold">Conflicts</span></h2>
+              </div>
+              <p className="text-xs text-slate-500 font-medium">Similar items detected in inventory. Please link them.</p>
+            </div>
+            <div className="max-h-[350px] overflow-y-auto p-6 space-y-3 bg-slate-50/50">
+              {importSuggestions.map((item, idx) => (
+                <div key={idx} className="p-4 bg-white rounded-xl border border-slate-200 shadow-sm flex flex-col gap-3 hover:border-indigo-300 transition-colors">
+                  <div className="flex justify-between items-start">
+                    <div>
+                        <span className="text-[8px] font-bold text-slate-400 uppercase tracking-widest block mb-1">Spreadsheet Record</span>
+                        <p className="text-xs font-semibold text-slate-800">{item.name}</p>
+                    </div>
+                    <div className="text-right flex flex-col items-end">
+                      <span className="text-[8px] font-bold text-indigo-500 uppercase tracking-widest block mb-2 px-2 py-0.5 bg-indigo-50 rounded border border-indigo-100">Match {item.score}%</span>
+                      <button onClick={() => { 
+                          const linkedItem = { productId: item.suggestion.id, name: item.suggestion.name, itemGroupId: item.suggestion.itemGroupId, itemGroupName: item.suggestion.itemGroup?.name, uom: item.suggestion.uom || item.uom, quantity: item.quantity, notes: item.notes, isNew: false }; 
+                          setCart(prev => [...prev, linkedItem]); 
+                          setImportSuggestions(prev => prev.filter((_, i) => i !== idx)); 
+                          if(importSuggestions.length === 1) toast.success("Semua item berhasil dihubungkan!"); 
+                        }} 
+                        className="bg-indigo-600 text-white text-[9px] font-bold uppercase tracking-widest px-3 py-1.5 rounded-lg shadow-md hover:bg-slate-900 transition-all active:scale-95"
+                      >
+                          Use Connect
+                      </button>
+                    </div>
+                  </div>
+                </div>
+              ))}
+            </div>
+            <div className="p-5 bg-white border-t border-slate-100">
+              <button onClick={() => { 
+                  const manualItems = importSuggestions.map(s => ({...s, productId: null, isNew: true})); 
+                  setCart(prev => [...prev, ...manualItems]); 
+                  setImportSuggestions([]); 
+                  toast.success("Item ditambahkan sebagai produk baru");
+                }} 
+                className="w-full py-3 text-[10px] font-bold text-slate-400 uppercase tracking-[0.2em] hover:text-slate-800 transition-colors hover:bg-slate-50 rounded-lg"
+              >
+                  Ignore & Add as New
+              </button>
             </div>
           </div>
         </div>
       )}
+      {/* --- AKHIR SECTION: SYNC CONFLICTS MODAL --- */}
+
     </div>
   );
 }
