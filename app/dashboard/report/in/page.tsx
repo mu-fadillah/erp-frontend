@@ -197,7 +197,7 @@ export default function IncomingGoodsReport() {
       'NAMA OUTLET': activeTab === 'summary' ? item.displayOutletName : (item.purchasing?.outlet?.name || '-'),
       ...(activeTab === 'detail' && { 
         'NO. SURAT JALAN': item.purchasing?.referenceNo || '-',
-        'TANGGAL RECEIVED': new Date(item.updatedAt).toLocaleDateString('id-ID'),
+        'TANGGAL RECEIVED': new Date(item.receivedDate || item.updatedAt).toLocaleDateString('id-ID'),
         'NOTES': item.notes || '-'
       })
     }));
@@ -495,7 +495,7 @@ export default function IncomingGoodsReport() {
                           </td>
                           {activeTab === 'detail' && (
                             <td className="px-6 py-3 text-slate-500 font-medium">
-                              {new Date(item.updatedAt).toLocaleDateString('id-ID', { day: '2-digit', month: 'short', year: 'numeric' })}
+                              {new Date(item.receivedDate || item.updatedAt).toLocaleDateString('id-ID', { day: '2-digit', month: 'short', year: 'numeric' })}
                             </td>
                           )}
                           <td className="px-6 py-3">

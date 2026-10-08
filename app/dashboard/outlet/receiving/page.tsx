@@ -38,6 +38,7 @@ interface POData {
   status: string;
   createdAt: string;
   supplier: { name: string };
+  outletId?: string;
   outlet?: { name: string }; 
   items: PurchasingItem[];
 }
@@ -49,11 +50,12 @@ export default function ReceivingPage() {
   const [activePOs, setActivePOs] = useState<POData[]>([]);
   const [loading, setLoading] = useState(true);
   
-  // KOREKSI: Tambahkan string kosong pada type amount untuk memfasilitasi input yang dihapus
   const [receiveData, setReceiveData] = useState<{ [key: string]: { amount: number | ''; notes: string } }>({});
-  
   const [suratJalan, setSuratJalan] = useState<{ [key: string]: string }>({});
   const [expandedPOs, setExpandedPOs] = useState<{ [key: string]: boolean }>({});
+  
+  // STATE BARU: Menyimpan input tanggal kustom secara spesifik per PO
+  const [receiveDates, setReceiveDates] = useState<{ [key: string]: string }>({});
   // --- AKHIR STATE MANAGEMENT ---
 
 
@@ -70,15 +72,31 @@ export default function ReceivingPage() {
         return;
       }
 
+      const userStr = typeof window !== 'undefined' ? localStorage.getItem('user') : null;
+      const user = userStr ? JSON.parse(userStr) : null;
+      const userRole = user?.role;
+      const userOutletId = user?.outletId;
+
       const onlySent = data
         .filter((po: any) => po.status === 'SENT')
-        .map((po: any) => ({
-          ...po,
-          // MODIFIKASI KRUSIAL: Sembunyikan item yang sudah pernah diproses.
-          // Item dianggap "Selesai" jika receivedQuantity > 0 ATAU user sudah memberi notes
-          items: po.items.filter((item: any) => item.receivedQuantity === 0 && (!item.notes || item.notes.trim() === ''))
-        }))
-        // Jangan tampilkan Kartu PO yang semua itemnya sudah selesai diproses
+        .map((po: any) => {
+          const filteredItems = po.items.filter((item: any) => {
+            const isNotReceived = item.receivedQuantity === 0 && (!item.notes || item.notes.trim() === '');
+            
+            let isMyItem = false;
+            if (userRole === 'SUPERADMIN') {
+              isMyItem = true; 
+            } else if (userOutletId) { 
+              const itemOwnerId = item.prItem?.purchaseRequest?.outletId || po.outletId;
+              if (itemOwnerId === userOutletId) {
+                isMyItem = true;
+              }
+            }
+            return isNotReceived && isMyItem;
+          });
+          
+          return { ...po, items: filteredItems };
+        })
         .filter((po: any) => po.items.length > 0)
         .sort((a: any, b: any) => b.orderNumber.localeCompare(a.orderNumber));
       
@@ -101,7 +119,6 @@ export default function ReceivingPage() {
   const handleMatchAll = (po: POData) => {
     const updates = { ...receiveData };
     po.items.forEach(item => {
-      // Karena item sudah ter-filter otomatis, kita bisa pastikan semuanya belum diproses
       updates[item.id] = { amount: item.quantity, notes: '' };
     });
     setReceiveData(updates);
@@ -131,15 +148,12 @@ export default function ReceivingPage() {
 
     const itemsToSubmit: any[] = [];
     
-    // Validasi super ketat sebelum kirim ke backend
     for (const item of po.items) {
       const rData = receiveData[item.id];
-      // Skip jika inputan belum disentuh atau dikosongkan
       if (!rData || rData.amount === '') continue;
 
       const amountNum = Number(rData.amount);
 
-      // MODIFIKASI KRUSIAL: Wajib isi notes jika barang yang diterima selisih!
       if (amountNum !== item.quantity && rData.notes.trim() === '') {
         return toast.error(`Alasan selisih wajib diisi untuk item: ${item.product?.name}`);
       }
@@ -157,17 +171,22 @@ export default function ReceivingPage() {
     
     if (!confirm(`Konfirmasi penerimaan SJ: ${sjNumber}?`)) return;
 
+    // LOGIKA TANGGAL: Gunakan inputan, ATAU gunakan waktu saat ini
+    const finalDate = receiveDates[poId] ? new Date(receiveDates[poId]).toISOString() : new Date().toISOString();
+
     try {
       const res = await fetchApi('/purchasing/po/receive', {
         method: 'PATCH',
-        body: JSON.stringify({ items: itemsToSubmit, referenceNo: sjNumber })
+        // Menyisipkan receivedDate ke dalam payload
+        body: JSON.stringify({ items: itemsToSubmit, referenceNo: sjNumber, receivedDate: finalDate })
       });
       
       if (res.ok) {
         toast.success("Barang berhasil diterima!");
         setReceiveData({});
         setSuratJalan(prev => { const n = {...prev}; delete n[poId]; return n; });
-        fetchActivePOs(); // Fetch data terbaru agar item yang disubmit langsung "hilang"
+        setReceiveDates(prev => { const n = {...prev}; delete n[poId]; return n; }); // Bersihkan tanggal
+        fetchActivePOs(); 
       } else {
         const errorData = await res.json();
         toast.error(`Gagal: ${errorData.message || "Terjadi kesalahan server"}`);
@@ -209,6 +228,10 @@ export default function ReceivingPage() {
             <div className="space-y-5">
               {activePOs.map((po) => {
                 const isExpanded = expandedPOs[po.id] || false;
+                
+                // Tentukan tanggal tampilan untuk notes selisih
+                const displayDate = receiveDates[po.id] ? new Date(receiveDates[po.id]).toLocaleDateString('id-ID') : new Date().toLocaleDateString('id-ID');
+
                 return (
                   <BentoCard key={po.id} noPadding>
                     
@@ -226,14 +249,27 @@ export default function ReceivingPage() {
                           <p className="text-[10px] text-slate-500 font-semibold mt-1 uppercase tracking-widest">{po.items.length} Items Pending</p>
                         </div>
                       </div>
-                      <div className="flex items-center gap-3">
+                      <div className="flex items-center gap-3 overflow-x-auto">
                         {isExpanded && (
                           <div className="flex items-center gap-2">
-                            <button onClick={(e) => { e.stopPropagation(); handleMatchAll(po); }} className="text-[10px] font-bold text-emerald-600 border border-emerald-100 px-3 py-1.5 rounded-lg hover:bg-emerald-50 transition-all uppercase flex items-center gap-1"><ListChecks size={14}/> Match All</button>
-                            <button onClick={(e) => { e.stopPropagation(); setReceiveData({}); }} className="text-[10px] font-bold text-slate-400 border border-slate-200 px-3 py-1.5 rounded-lg hover:bg-slate-100 transition-all uppercase flex items-center gap-1"><XCircle size={14}/> Clear</button>
+                            
+                            {/* --- INPUT TANGGAL KUSTOM --- */}
+                            <div className="flex items-center bg-white border border-slate-200 rounded-lg px-2.5 py-1.5 shadow-sm focus-within:border-indigo-400 transition-all">
+                              <Calendar size={14} className="text-slate-400 mr-2" />
+                              <input 
+                                type="datetime-local" 
+                                onClick={(e) => e.stopPropagation()} // Mencegah accordion tertutup saat input diklik
+                                className="text-[10px] font-semibold outline-none bg-transparent text-slate-600 w-[135px]"
+                                value={receiveDates[po.id] || ''}
+                                onChange={(e) => setReceiveDates({...receiveDates, [po.id]: e.target.value})}
+                              />
+                            </div>
+                            
+                            <button onClick={(e) => { e.stopPropagation(); handleMatchAll(po); }} className="text-[10px] font-bold text-emerald-600 border border-emerald-100 px-3 py-1.5 rounded-lg hover:bg-emerald-50 transition-all uppercase flex items-center gap-1 whitespace-nowrap"><ListChecks size={14}/> Match All</button>
+                            <button onClick={(e) => { e.stopPropagation(); setReceiveData({}); }} className="text-[10px] font-bold text-slate-400 border border-slate-200 px-3 py-1.5 rounded-lg hover:bg-slate-100 transition-all uppercase flex items-center gap-1 whitespace-nowrap"><XCircle size={14}/> Clear</button>
                           </div>
                         )}
-                        {isExpanded ? <ChevronUp className="text-slate-400" size={20} /> : <ChevronDown className="text-slate-300" size={20} />}
+                        {isExpanded ? <ChevronUp className="text-slate-400 min-w-[20px]" size={20} /> : <ChevronDown className="text-slate-300 min-w-[20px]" size={20} />}
                       </div>
                     </div>
 
@@ -252,7 +288,6 @@ export default function ReceivingPage() {
                           </thead>
                           <tbody className="divide-y divide-slate-50">
                             {po.items.map((item) => {
-                              // Item sudah 100% dijamin belum di-receive berkat filter di fetchActivePOs
                               const requestedQty = item.quantity;
                               
                               return (
@@ -267,7 +302,7 @@ export default function ReceivingPage() {
                                     <p className="text-sm font-bold text-slate-800 uppercase tracking-tight">{item.product?.name}</p>
                                     <div className="flex items-center gap-2 mt-1">
                                       <StatusBadge status={po.status} />
-                                      <span className="flex items-center gap-1 text-[9px] font-bold text-indigo-600 bg-indigo-50 px-2 py-0.5 rounded border border-indigo-100 uppercase"><MapPin size={10} /> {item.prItem?.purchaseRequest?.outlet?.name || 'Central'}</span>
+                                      <span className="flex items-center gap-1 text-[9px] font-bold text-indigo-600 bg-indigo-50 px-2 py-0.5 rounded border border-indigo-100 uppercase"><MapPin size={10} /> {item.prItem?.purchaseRequest?.outlet?.name || po.outlet?.name || 'Central'}</span>
                                     </div>
                                   </td>
                                   <td className="px-6 py-5 text-center text-sm font-bold text-slate-500">{requestedQty} <span className="text-[9px] text-slate-400">{item.uom}</span></td>
@@ -300,7 +335,8 @@ export default function ReceivingPage() {
                                             className="w-full max-w-[200px] px-3 py-2 rounded-lg bg-rose-50 border border-rose-300 text-xs font-medium text-rose-700 outline-none focus:border-rose-500 placeholder:text-rose-300 shadow-inner" 
                                           />
                                         )}
-                                        <div className="flex items-center gap-1 text-[9px] font-bold text-emerald-600 uppercase tracking-widest"><Calendar size={10} /> {new Date().toLocaleDateString('id-ID')}</div>
+                                        {/* Menampilkan tanggal sesuai dengan pilihan user */}
+                                        <div className="flex items-center gap-1 text-[9px] font-bold text-emerald-600 uppercase tracking-widest"><Calendar size={10} /> {displayDate}</div>
                                       </div>
                                     ) : <span className="text-[10px] text-slate-300 italic uppercase">Waiting...</span>}
                                   </td>

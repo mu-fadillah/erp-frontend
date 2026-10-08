@@ -7,8 +7,8 @@ import {
   History as HistoryIcon, RefreshCw 
 } from 'lucide-react';
 import * as XLSX from 'xlsx';
-import toast from 'react-hot-toast'; // Tambahan utilitas global toast
-import { fetchApi } from '../../../utils/api'; // Menggunakan utilitas global API
+import toast from 'react-hot-toast'; 
+import { fetchApi } from '../../../utils/api'; 
 
 /* --- UI COMPONENTS IMPORT --- */
 import PageHeader from '@/components/ui/PageHeader';
@@ -30,6 +30,9 @@ export default function AdminOutletRequestPage() {
   const [showImportMenu, setShowImportMenu] = useState(false);
   const [importSuggestions, setImportSuggestions] = useState<any[]>([]); 
   const [currentUser, setCurrentUser] = useState<any>(null);
+  
+  // STATE BARU: Menyimpan input tanggal kustom dari user
+  const [requestDate, setRequestDate] = useState<string>('');
 
   const importMenuRef = useRef<HTMLDivElement>(null);
   const fileInputRef = useRef<HTMLInputElement>(null);
@@ -62,7 +65,6 @@ export default function AdminOutletRequestPage() {
   // --- FETCH DATA (API CALLS) ---
   const fetchData = async () => {
     try {
-      // Menggunakan fetchApi global (otomatis menyisipkan token)
       const [prodRes, groupRes, outletRes] = await Promise.all([
         fetchApi('/product'), 
         fetchApi('/item-group'), 
@@ -182,8 +184,12 @@ export default function AdminOutletRequestPage() {
   };
 
   const handleSendRequest = async () => {
-    if (cart.length === 0 || !selectedOutletId) {
-        return toast.error("Pilih outlet dan minimal 1 item untuk dipesan!");
+    // Validasi dipecah agar error lebih informatif
+    if (!selectedOutletId) {
+        return toast.error("Destinasi outlet belum dipilih!");
+    }
+    if (cart.length === 0) {
+        return toast.error("Keranjang request masih kosong!");
     }
 
     const cleanedItems = cart.map(item => ({
@@ -191,16 +197,23 @@ export default function AdminOutletRequestPage() {
       itemGroupName: item.itemGroupName || 'Umum', itemGroupId: item.itemGroupId || undefined, notes: item.notes || ''
     }));
 
+    // LOGIKA TANGGAL: Ambil dari inputan, jika kosong gunakan waktu saat ini (Internet/Sistem)
+    const finalDate = requestDate ? new Date(requestDate).toISOString() : new Date().toISOString();
+
     setLoading(true);
     try {
-      // Menggunakan fetchApi global
       const response = await fetchApi('/purchasing/pr/create', {
         method: 'POST', 
-        body: JSON.stringify({ outletId: selectedOutletId, items: cleanedItems }),
+        body: JSON.stringify({ 
+          outletId: selectedOutletId, 
+          items: cleanedItems,
+          createdAt: finalDate // Mengirim tanggal override ke backend
+        }),
       });
       
       if (response.ok) { 
         setCart([]); 
+        setRequestDate(''); // Reset kalender ke posisi kosong
         if (currentUser?.role !== 'ADMINOUTLET') setSelectedOutletId(''); 
         toast.success("Request berhasil dikirim!"); 
         setActiveTab('history'); 
@@ -264,6 +277,8 @@ export default function AdminOutletRequestPage() {
             searchTerm={searchTerm} setSearchTerm={setSearchTerm} products={products} addToCart={addToCart} 
             selectedOutletId={selectedOutletId} setSelectedOutletId={setSelectedOutletId} currentUser={currentUser} 
             outlets={outlets} cart={cart} setCart={setCart} itemGroups={itemGroups} handleSendRequest={handleSendRequest} loading={loading} 
+            // Props Tanggal Baru
+            requestDate={requestDate} setRequestDate={setRequestDate}
           />
         ) : (
           <RequestHistory />

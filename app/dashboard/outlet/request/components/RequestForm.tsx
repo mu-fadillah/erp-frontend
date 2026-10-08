@@ -2,7 +2,7 @@
 /* eslint-disable @typescript-eslint/no-explicit-any */
 'use client';
 import React from 'react';
-import { Search, Plus, X, Building2, ShoppingCart, AlertCircle, Loader2, ChevronDown } from 'lucide-react';
+import { Search, Plus, X, Building2, ShoppingCart, AlertCircle, Loader2, ChevronDown, CalendarDays } from 'lucide-react';
 import BentoCard from '@/components/ui/BentoCard';
 import AnimatedWrapper from '@/components/ui/AnimatedWrapper';
 
@@ -20,12 +20,15 @@ interface RequestFormProps {
   itemGroups: any[];
   handleSendRequest: () => void;
   loading: boolean;
+  // PERBAIKAN: Tambahkan props untuk state tanggal
+  requestDate: string;
+  setRequestDate: (val: string) => void;
 }
 
 export default function RequestForm({
   searchTerm, setSearchTerm, products, addToCart, selectedOutletId,
   setSelectedOutletId, currentUser, outlets, cart, setCart,
-  itemGroups, handleSendRequest, loading
+  itemGroups, handleSendRequest, loading, requestDate, setRequestDate
 }: RequestFormProps) {
   return (
     <AnimatedWrapper delay="500">
@@ -105,7 +108,7 @@ export default function RequestForm({
           <BentoCard noPadding className="flex flex-col h-full min-h-[500px]">
             
             {/* Header Tabel Draft */}
-            <div className="px-6 py-5 border-b border-slate-100 flex justify-between items-center bg-slate-50/30">
+            <div className="px-6 py-5 border-b border-slate-100 flex flex-col sm:flex-row justify-between items-start sm:items-center gap-4 bg-slate-50/30">
               <div className="flex items-center gap-3">
                 <div className="bg-indigo-100 p-2.5 rounded-lg text-indigo-600 shadow-sm"><ShoppingCart size={16}/></div>
                 <div>
@@ -113,14 +116,28 @@ export default function RequestForm({
                   <p className="text-[10px] text-slate-400 font-semibold uppercase tracking-[0.1em]">Total queuing: {cart.length} items</p>
                 </div>
               </div>
-              {cart.length > 0 && (
-                <button 
-                  onClick={() => { setCart([]); if(currentUser?.role !== 'ADMINOUTLET') setSelectedOutletId(''); }} 
-                  className="text-[10px] font-semibold text-rose-400 hover:text-rose-600 uppercase tracking-widest px-3 py-1.5 rounded-lg transition-all hover:bg-rose-50 border border-transparent hover:border-rose-100"
-                >
-                  Clear Queue
-                </button>
-              )}
+              
+              <div className="flex items-center gap-3 w-full sm:w-auto">
+                {/* PERBAIKAN: Input Tanggal Otomatis/Manual */}
+                <div className="flex items-center bg-white border border-slate-200 rounded-lg px-3 py-1.5 shadow-sm focus-within:border-indigo-400 transition-all flex-grow sm:flex-grow-0">
+                  <CalendarDays size={14} className="text-slate-400 mr-2" />
+                  <input 
+                    type="datetime-local" 
+                    className="text-xs font-semibold outline-none bg-transparent text-slate-600 w-full"
+                    value={requestDate}
+                    onChange={(e) => setRequestDate(e.target.value)}
+                  />
+                </div>
+
+                {cart.length > 0 && (
+                  <button 
+                    onClick={() => { setCart([]); if(currentUser?.role !== 'ADMINOUTLET') setSelectedOutletId(''); }} 
+                    className="text-[10px] font-semibold text-rose-400 hover:text-rose-600 uppercase tracking-widest px-3 py-1.5 rounded-lg transition-all hover:bg-rose-50 border border-transparent hover:border-rose-100 whitespace-nowrap"
+                  >
+                    Clear Queue
+                  </button>
+                )}
+              </div>
             </div>
 
             {/* Area Tabel */}
@@ -219,8 +236,12 @@ export default function RequestForm({
             <div className="p-6 bg-slate-50/50 border-t border-slate-100">
               <button 
                 onClick={handleSendRequest} 
-                disabled={loading || cart.length === 0} 
-                className={`w-full py-4 rounded-xl font-semibold text-xs uppercase tracking-[0.2em] shadow-lg transition-all active:scale-95 disabled:opacity-40 disabled:translate-y-0 translate-y-[-1px] ${cart.length > 0 ? 'bg-slate-900 text-white hover:bg-indigo-600 hover:shadow-indigo-500/20' : 'bg-slate-200 text-slate-400 cursor-not-allowed'}`}
+                disabled={loading || cart.length === 0 || !selectedOutletId} 
+                className={`w-full py-4 rounded-xl font-semibold text-xs uppercase tracking-[0.2em] shadow-lg transition-all active:scale-95 disabled:opacity-40 disabled:translate-y-0 translate-y-[-1px] ${
+                  (cart.length > 0 && selectedOutletId) 
+                    ? 'bg-slate-900 text-white hover:bg-indigo-600 hover:shadow-indigo-500/20' 
+                    : 'bg-slate-200 text-slate-400 cursor-not-allowed'
+                }`}
               >
                 {loading ? <Loader2 className="animate-spin mx-auto" size={18}/> : 'Complete & Send Request'}
               </button>
